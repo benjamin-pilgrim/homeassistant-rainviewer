@@ -1,0 +1,318 @@
+"""Radar image analysis for RainViewer Nowcast."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from io import BytesIO
+import math
+
+from PIL import Image
+
+from .const import ANALYSIS_SIZE, TILE_SIZE
+
+
+@dataclass(slots=True, frozen=True)
+class MotionVector:
+    """Estimated radar echo motion."""
+
+    dx_px_per_10min: float
+    dy_px_per_10min: float
+    samples: int
+    speed_kmh: float
+    bearing_toward_deg: float
+    direction: str
+    consistency: float
+
+
+@dataclass(slots=True, frozen=True)
+class NowcastResult:
+    """Derived nowcast values."""
+
+    rain_approaching: bool
+    raining_now: bool
+    eta_minutes: int | None
+    confidence: int
+    now_coverage_percent: float
+    frame_time: datetime | None
+    generated_time: datetime | None
+    frame_age_minutes: float | None
+    motion: MotionVector | None
+    frame_count: int
+
+
+def _decode_alpha(tile: bytes, size: int) -> list[int]:
+    """Decode a tile to an alpha/intensity mask."""
+    with Image.open(BytesIO(tile)) as image:
+        rgba = image.convert("RGBA").resize((size, size), Image.Resampling.BILINEAR)
+        return list(rgba.getchannel("A").getdata())
+
+
+def _pixel(mask: list[int], size: int, x_coord: int, y_coord: int) -> int:
+    """Return a mask pixel or zero outside the image."""
+    if 0 <= x_coord < size and 0 <= y_coord < size:
+        return mask[y_coord * size + x_coord]
+    return 0
+
+
+def _meters_per_pixel(latitude: float, zoom: int) -> float:
+    """Return approximate Web Mercator meters per pixel at latitude."""
+    return 156543.03392804097 * math.cos(math.radians(latitude)) / (2**zoom)
+
+
+def _direction_from_bearing(bearing: float) -> str:
+    """Return an 8-point compass direction."""
+    directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    return directions[int((bearing + 22.5) // 45) % 8]
+
+
+def _estimate_pair_shift(
+    previous: list[int],
+    current: list[int],
+    *,
+    center_x: int,
+    center_y: int,
+    window: int = 28,
+    max_shift: int = 10,
+) -> tuple[int, int, float] | None:
+    """Estimate how a precipitation pattern moved from previous to current."""
+    energy = 0
+    for y_coord in range(center_y - window, center_y + window + 1):
+        for x_coord in range(center_x - window, center_x + window + 1):
+            energy += _pixel(previous, ANALYSIS_SIZE, x_coord, y_coord)
+            energy += _pixel(current, ANALYSIS_SIZE, x_coord, y_coord)
+
+    if energy < 255 * 40:
+        return None
+
+    best_score: float | None = None
+    best_dx = 0
+    best_dy = 0
+
+    for dy_coord in range(-max_shift, max_shift + 1):
+        for dx_coord in range(-max_shift, max_shift + 1):
+            score = 0
+            count = 0
+            for y_coord in range(center_y - window, center_y + window + 1, 2):
+                for x_coord in range(center_x - window, center_x + window + 1, 2):
+                    score += abs(
+                        _pixel(current, ANALYSIS_SIZE, x_coord, y_coord)
+                        - _pixel(
+                            previous,
+                            ANALYSIS_SIZE,
+                            x_coord - dx_coord,
+                            y_coord - dy_coord,
+                        )
+                    )
+                    count += 1
+            mean_score = score / count
+            if best_score is None or mean_score < best_score:
+                best_score = mean_score
+                best_dx = dx_coord
+                best_dy = dy_coord
+
+    if best_score is None:
+        return None
+    return best_dx, best_dy, best_score
+
+
+def _estimate_motion(
+    masks: list[list[int]], latitude: float, zoom: int
+) -> MotionVector | None:
+    """Estimate local radar echo motion from recent masks."""
+    if len(masks) < 2:
+        return None
+
+    center = ANALYSIS_SIZE // 2
+    shifts: list[tuple[int, int]] = []
+    for previous, current in zip(masks[-7:-1], masks[-6:], strict=False):
+        shift = _estimate_pair_shift(
+            previous,
+            current,
+            center_x=center,
+            center_y=center,
+        )
+        if shift is not None:
+            shifts.append((shift[0], shift[1]))
+
+    if not shifts:
+        return None
+
+    dx = sum(shift[0] for shift in shifts) / len(shifts)
+    dy = sum(shift[1] for shift in shifts) / len(shifts)
+    variance = sum(
+        (shift[0] - dx) ** 2 + (shift[1] - dy) ** 2 for shift in shifts
+    ) / len(shifts)
+    consistency = max(0.0, min(1.0, 1.0 - math.sqrt(variance) / 8.0))
+
+    analysis_px_km = _meters_per_pixel(latitude, zoom) * (
+        TILE_SIZE / ANALYSIS_SIZE
+    ) / 1000
+    east_km_per_10min = dx * analysis_px_km
+    north_km_per_10min = -dy * analysis_px_km
+    speed_kmh = math.hypot(east_km_per_10min, north_km_per_10min) * 6
+
+    if speed_kmh < 3:
+        return None
+
+    bearing = (
+        math.degrees(math.atan2(east_km_per_10min, north_km_per_10min)) + 360
+    ) % 360
+    return MotionVector(
+        dx_px_per_10min=dx * (TILE_SIZE / ANALYSIS_SIZE),
+        dy_px_per_10min=dy * (TILE_SIZE / ANALYSIS_SIZE),
+        samples=len(shifts),
+        speed_kmh=round(speed_kmh, 1),
+        bearing_toward_deg=round(bearing, 1),
+        direction=_direction_from_bearing(bearing),
+        consistency=round(consistency, 2),
+    )
+
+
+def _coverage_percent(mask: list[int], radius_px: float) -> float:
+    """Return precipitation-pixel coverage around the tile center."""
+    center = TILE_SIZE // 2
+    radius = max(2, math.ceil(radius_px))
+    total = 0
+    wet = 0
+
+    for y_coord in range(center - radius, center + radius + 1):
+        for x_coord in range(center - radius, center + radius + 1):
+            if (x_coord - center) ** 2 + (y_coord - center) ** 2 > radius**2:
+                continue
+            total += 1
+            if _pixel(mask, TILE_SIZE, x_coord, y_coord) > 24:
+                wet += 1
+
+    if total == 0:
+        return 0.0
+    return round(wet / total * 100, 1)
+
+
+def _project_arrival(
+    latest_mask: list[int],
+    motion: MotionVector | None,
+    *,
+    radius_px: float,
+    horizon_minutes: int,
+) -> tuple[int | None, int]:
+    """Project the latest mask forward and return ETA/confidence contribution."""
+    if motion is None:
+        return None, 0
+
+    center = TILE_SIZE // 2
+    radius = max(2, math.ceil(radius_px))
+    hit_count = 0
+    first_hit: int | None = None
+
+    for minutes in range(5, horizon_minutes + 1, 5):
+        factor = minutes / 10
+        source_center_x = center - motion.dx_px_per_10min * factor
+        source_center_y = center - motion.dy_px_per_10min * factor
+
+        hit = False
+        for y_offset in range(-radius, radius + 1):
+            for x_offset in range(-radius, radius + 1):
+                if x_offset**2 + y_offset**2 > radius**2:
+                    continue
+                value = _pixel(
+                    latest_mask,
+                    TILE_SIZE,
+                    round(source_center_x + x_offset),
+                    round(source_center_y + y_offset),
+                )
+                if value > 24:
+                    hit = True
+                    break
+            if hit:
+                break
+
+        if hit:
+            hit_count += 1
+            if first_hit is None:
+                first_hit = minutes
+
+    return first_hit, min(40, hit_count * 8)
+
+
+def analyse_nowcast(
+    *,
+    tiles: list[bytes],
+    frame_times: list[int],
+    generated: int | None,
+    latitude: float,
+    zoom: int,
+    radius_km: float,
+    horizon_minutes: int,
+) -> NowcastResult:
+    """Analyse RainViewer tiles and return a local nowcast."""
+    if not tiles:
+        return NowcastResult(
+            rain_approaching=False,
+            raining_now=False,
+            eta_minutes=None,
+            confidence=0,
+            now_coverage_percent=0.0,
+            frame_time=None,
+            generated_time=None,
+            frame_age_minutes=None,
+            motion=None,
+            frame_count=0,
+        )
+
+    analysis_masks = [_decode_alpha(tile, ANALYSIS_SIZE) for tile in tiles]
+    latest_mask = _decode_alpha(tiles[-1], TILE_SIZE)
+    motion = _estimate_motion(analysis_masks, latitude, zoom)
+
+    radius_px = radius_km / (_meters_per_pixel(latitude, zoom) / 1000)
+    now_coverage = _coverage_percent(latest_mask, radius_px)
+    raining_now = now_coverage > 0
+
+    eta_minutes: int | None
+    projection_confidence: int
+    if raining_now:
+        eta_minutes = 0
+        projection_confidence = 35
+    else:
+        eta_minutes, projection_confidence = _project_arrival(
+            latest_mask,
+            motion,
+            radius_px=radius_px,
+            horizon_minutes=horizon_minutes,
+        )
+
+    rain_approaching = eta_minutes is not None and eta_minutes <= horizon_minutes
+    motion_confidence = 0
+    if motion is not None:
+        motion_confidence = round(40 * motion.consistency)
+        motion_confidence += min(20, motion.samples * 3)
+
+    confidence = min(100, projection_confidence + motion_confidence)
+    if not rain_approaching:
+        confidence = min(confidence, 40)
+
+    frame_time = (
+        datetime.fromtimestamp(frame_times[-1], tz=UTC) if frame_times else None
+    )
+    generated_time = (
+        datetime.fromtimestamp(generated, tz=UTC) if generated is not None else None
+    )
+    frame_age_minutes = None
+    if frame_time is not None:
+        frame_age_minutes = round(
+            (datetime.now(tz=UTC) - frame_time).total_seconds() / 60,
+            1,
+        )
+
+    return NowcastResult(
+        rain_approaching=rain_approaching,
+        raining_now=raining_now,
+        eta_minutes=eta_minutes,
+        confidence=confidence,
+        now_coverage_percent=now_coverage,
+        frame_time=frame_time,
+        generated_time=generated_time,
+        frame_age_minutes=frame_age_minutes,
+        motion=motion,
+        frame_count=len(tiles),
+    )

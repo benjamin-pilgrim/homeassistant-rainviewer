@@ -1,0 +1,13 @@
+{
+  "domain": "rainviewer_nowcast",
+  "name": "RainViewer Nowcast",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/benjamin-pilgrim/homeassistant-rainviewer",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/benjamin-pilgrim/homeassistant-rainviewer/issues",
+  "requirements": ["Pillow>=10.0.0"],
+  "version": "0.1.0"
+}
+

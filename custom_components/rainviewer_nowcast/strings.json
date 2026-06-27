@@ -1,0 +1,25 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "timeout": "Timed out while connecting to RainViewer."
+    },
+    "step": {
+      "user": {
+        "data": {
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "radius_km": "Detection radius in km",
+          "horizon_minutes": "Forecast horizon in minutes",
+          "zoom": "Radar zoom"
+        },
+        "description": "Track short-range precipitation movement around a location. Defaults to your Home Assistant home location.",
+        "title": "Set up RainViewer Nowcast"
+      }
+    }
+  }
+}
+

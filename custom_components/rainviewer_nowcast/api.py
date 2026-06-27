@@ -1,0 +1,69 @@
+"""Client helpers for the RainViewer API."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import aiohttp
+
+from .const import RAINVIEWER_API_URL, TILE_SIZE
+
+
+@dataclass(slots=True, frozen=True)
+class RainViewerFrame:
+    """A RainViewer radar frame."""
+
+    time: int
+    path: str
+
+
+@dataclass(slots=True, frozen=True)
+class RainViewerMap:
+    """RainViewer map metadata."""
+
+    generated: int
+    host: str
+    frames: list[RainViewerFrame]
+
+
+async def get_weather_maps(session: aiohttp.ClientSession) -> RainViewerMap:
+    """Return RainViewer weather-map metadata."""
+    response = await session.get(
+        RAINVIEWER_API_URL,
+        raise_for_status=True,
+        timeout=aiohttp.ClientTimeout(total=30),
+    )
+    data: dict[str, Any] = await response.json()
+    frames = [
+        RainViewerFrame(time=frame["time"], path=frame["path"])
+        for frame in data.get("radar", {}).get("past", [])
+        if "time" in frame and "path" in frame
+    ]
+    return RainViewerMap(
+        generated=data["generated"],
+        host=data["host"],
+        frames=frames,
+    )
+
+
+async def get_radar_tile(
+    session: aiohttp.ClientSession,
+    host: str,
+    frame: RainViewerFrame,
+    latitude: float,
+    longitude: float,
+    zoom: int,
+) -> bytes:
+    """Return a coordinate-centered RainViewer radar tile."""
+    url = (
+        f"{host}{frame.path}/{TILE_SIZE}/{zoom}/"
+        f"{latitude:.6f}/{longitude:.6f}/2/1_1.png"
+    )
+    response = await session.get(
+        url,
+        raise_for_status=True,
+        timeout=aiohttp.ClientTimeout(total=30),
+    )
+    return await response.read()
+
