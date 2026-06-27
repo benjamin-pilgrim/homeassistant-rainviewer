@@ -126,6 +126,30 @@ def render_radar_map(
     base_tiles: list[BaseMapTile],
 ) -> bytes:
     """Render a 512px radar map image from base-map tiles and radar overlay."""
+    return _encode_png(_render_radar_frame(radar_tile, base_tiles))
+
+
+def render_radar_animation_map(
+    *,
+    radar_tiles: list[bytes],
+    base_tiles: list[BaseMapTile],
+) -> bytes | None:
+    """Render an animated radar map from recent radar frames."""
+    frames = [_render_radar_frame(tile, base_tiles) for tile in radar_tiles]
+    return _encode_apng(frames)
+
+
+def render_radar_animation_overlay(*, radar_tiles: list[bytes]) -> bytes | None:
+    """Render an animated transparent radar overlay from recent frames."""
+    frames = [_radar_image(tile) for tile in radar_tiles]
+    return _encode_apng(frames)
+
+
+def _render_radar_frame(
+    radar_tile: bytes,
+    base_tiles: list[BaseMapTile],
+) -> Image.Image:
+    """Render a single radar frame over the base map."""
     canvas = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (238, 242, 244, 255))
 
     for base_tile in base_tiles:
@@ -135,17 +159,7 @@ def render_radar_map(
                 (base_tile.x_offset, base_tile.y_offset),
             )
 
-    with Image.open(BytesIO(radar_tile)) as image:
-        radar = image.convert("RGBA")
-
-    pixels = radar.load()
-    for y_coord in range(radar.height):
-        for x_coord in range(radar.width):
-            red, green, blue, alpha = pixels[x_coord, y_coord]
-            if alpha and red < 4 and green < 4 and blue < 4:
-                pixels[x_coord, y_coord] = (red, green, blue, 0)
-
-    canvas.alpha_composite(radar)
+    canvas.alpha_composite(_radar_image(radar_tile))
 
     draw = ImageDraw.Draw(canvas)
     center = TILE_SIZE // 2
@@ -171,8 +185,46 @@ def render_radar_map(
         width=2,
     )
 
+    return canvas
+
+
+def _radar_image(radar_tile: bytes) -> Image.Image:
+    """Return a RainViewer radar tile with black background made transparent."""
+    with Image.open(BytesIO(radar_tile)) as image:
+        radar = image.convert("RGBA")
+
+    pixels = radar.load()
+    for y_coord in range(radar.height):
+        for x_coord in range(radar.width):
+            red, green, blue, alpha = pixels[x_coord, y_coord]
+            if alpha and red < 4 and green < 4 and blue < 4:
+                pixels[x_coord, y_coord] = (red, green, blue, 0)
+
+    return radar
+
+
+def _encode_png(image: Image.Image) -> bytes:
+    """Return PNG bytes for an image."""
     output = BytesIO()
-    canvas.save(output, format="PNG")
+    image.save(output, format="PNG")
+    return output.getvalue()
+
+
+def _encode_apng(frames: list[Image.Image]) -> bytes | None:
+    """Return APNG bytes for a list of frames."""
+    if not frames:
+        return None
+
+    output = BytesIO()
+    frames[0].save(
+        output,
+        format="PNG",
+        save_all=True,
+        append_images=frames[1:],
+        duration=650,
+        loop=0,
+        disposal=2,
+    )
     return output.getvalue()
 
 

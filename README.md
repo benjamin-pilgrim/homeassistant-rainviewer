@@ -54,6 +54,8 @@ The integration creates:
 | `sensor.rain_nowcast_confidence` | Simple confidence score from motion consistency and projected hits. |
 | `image.radar_map` | Latest 512px radar map image with an OpenStreetMap base layer, RainViewer radar overlay, and center marker. |
 | `image.radar_overlay` | Latest raw 512px RainViewer radar overlay without base-map tiles. |
+| `image.radar_animation` | Animated PNG loop of recent radar frames on the OpenStreetMap base layer. |
+| `image.radar_animation_overlay` | Animated PNG loop of recent radar overlays without base-map tiles. |
 
 ## Notes
 
@@ -68,3 +70,6 @@ The integration creates:
 - The image entities refresh when the RainViewer frame changes. `Radar Map`
   uses OpenStreetMap tiles as a visual base map; `Radar Overlay` is the raw
   RainViewer overlay.
+- Animation entities are APNG files served as `image/png`, preserving
+  transparency for overlay use while remaining compatible with normal image
+  cards in modern browsers.

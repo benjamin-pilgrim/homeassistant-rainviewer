@@ -26,6 +26,8 @@ async def async_setup_entry(
         [
             RainViewerRadarMapImage(coordinator, config_entry),
             RainViewerRadarOverlayImage(coordinator, config_entry),
+            RainViewerRadarAnimationImage(coordinator, config_entry),
+            RainViewerRadarAnimationOverlayImage(coordinator, config_entry),
         ]
     )
 
@@ -116,3 +118,41 @@ class RainViewerRadarOverlayImage(RainViewerRadarMapImage):
     async def async_image(self) -> bytes | None:
         """Return latest raw radar overlay image bytes."""
         return self.coordinator.radar_overlay
+
+
+class RainViewerRadarAnimationImage(RainViewerRadarMapImage):
+    """Animated radar map loop."""
+
+    _attr_name = "Radar Animation"
+
+    def __init__(
+        self,
+        coordinator: RainViewerCoordinator,
+        entry: RainViewerConfigEntry,
+    ) -> None:
+        """Initialise the image entity."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_radar_animation"
+
+    async def async_image(self) -> bytes | None:
+        """Return latest animated radar map image bytes."""
+        return self.coordinator.radar_animation
+
+
+class RainViewerRadarAnimationOverlayImage(RainViewerRadarMapImage):
+    """Animated transparent radar overlay loop."""
+
+    _attr_name = "Radar Animation Overlay"
+
+    def __init__(
+        self,
+        coordinator: RainViewerCoordinator,
+        entry: RainViewerConfigEntry,
+    ) -> None:
+        """Initialise the image entity."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_radar_animation_overlay"
+
+    async def async_image(self) -> bytes | None:
+        """Return latest animated radar overlay bytes."""
+        return self.coordinator.radar_animation_overlay
