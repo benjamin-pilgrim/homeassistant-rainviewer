@@ -72,6 +72,8 @@ The integration creates:
 - Analysis uses unsmoothed RainViewer Universal Blue rain tiles without separate
   snow coloring (`2/0_0`) and converts pixels through the published RainViewer
   color table to a relative intensity mask.
+- Local rain detection requires a small cluster of wet pixels inside the
+  configured radius, not a single barely-wet radar pixel.
 - Display images use smoothed Universal Blue rain tiles without separate snow
   coloring (`2/1_0`) so the visual palette matches the analysis palette.
 - The image entities refresh when the RainViewer frame changes. `Radar Map`

@@ -54,6 +54,8 @@ class BaseMapTile:
 
 _INTENSITY_ALPHA_THRESHOLD = 24
 _INTENSITY_WET_THRESHOLD = 18
+_MIN_WET_COVERAGE_PERCENT = 5.0
+_MIN_WET_PIXELS = 2
 _PALETTE_QUANT_BITS = 5
 _PALETTE_QUANT_SIZE = 1 << _PALETTE_QUANT_BITS
 _PALETTE_SHIFT = 8 - _PALETTE_QUANT_BITS
@@ -614,20 +616,52 @@ def _estimate_motion(
     )
 
 
-def _coverage_percent(mask: list[int], radius_px: float) -> float:
-    """Return precipitation-pixel coverage around the tile center."""
-    center = TILE_SIZE // 2
+def _wet_area_stats(
+    mask: list[int],
+    *,
+    center_x: float,
+    center_y: float,
+    radius_px: float,
+) -> tuple[int, int]:
+    """Return total and wet pixel counts around a point."""
     radius = max(2, math.ceil(radius_px))
     total = 0
     wet = 0
 
-    for y_coord in range(center - radius, center + radius + 1):
-        for x_coord in range(center - radius, center + radius + 1):
-            if (x_coord - center) ** 2 + (y_coord - center) ** 2 > radius**2:
+    for y_offset in range(-radius, radius + 1):
+        for x_offset in range(-radius, radius + 1):
+            if x_offset**2 + y_offset**2 > radius**2:
                 continue
+            x_coord = round(center_x + x_offset)
+            y_coord = round(center_y + y_offset)
             total += 1
             if _pixel(mask, TILE_SIZE, x_coord, y_coord) > _INTENSITY_WET_THRESHOLD:
                 wet += 1
+
+    return total, wet
+
+
+def _has_significant_wet_area(total: int, wet: int) -> bool:
+    """Return whether wet pixels are enough to count as local precipitation."""
+    if total == 0:
+        return False
+
+    minimum_wet_pixels = max(
+        _MIN_WET_PIXELS,
+        math.ceil(total * _MIN_WET_COVERAGE_PERCENT / 100),
+    )
+    return wet >= minimum_wet_pixels
+
+
+def _coverage_percent(mask: list[int], radius_px: float) -> float:
+    """Return precipitation-pixel coverage around the tile center."""
+    center = TILE_SIZE // 2
+    total, wet = _wet_area_stats(
+        mask,
+        center_x=center,
+        center_y=center,
+        radius_px=radius_px,
+    )
 
     if total == 0:
         return 0.0
@@ -656,24 +690,14 @@ def _project_rain_window(
         source_center_x = center - motion.dx_px_per_10min * factor
         source_center_y = center - motion.dy_px_per_10min * factor
 
-        hit = False
-        for y_offset in range(-radius, radius + 1):
-            for x_offset in range(-radius, radius + 1):
-                if x_offset**2 + y_offset**2 > radius**2:
-                    continue
-                value = _pixel(
-                    latest_mask,
-                    TILE_SIZE,
-                    round(source_center_x + x_offset),
-                    round(source_center_y + y_offset),
-                )
-                if value > _INTENSITY_WET_THRESHOLD:
-                    hit = True
-                    break
-            if hit:
-                break
+        total, wet = _wet_area_stats(
+            latest_mask,
+            center_x=source_center_x,
+            center_y=source_center_y,
+            radius_px=radius,
+        )
 
-        if hit:
+        if _has_significant_wet_area(total, wet):
             hit_minutes.append(minutes)
             if first_hit is None:
                 first_hit = minutes
@@ -723,7 +747,14 @@ def analyse_nowcast(
 
     radius_px = radius_km / (_meters_per_pixel(latitude, zoom) / 1000)
     now_coverage = _coverage_percent(latest_mask, radius_px)
-    raining_now = now_coverage > 0
+    center = TILE_SIZE // 2
+    total, wet = _wet_area_stats(
+        latest_mask,
+        center_x=center,
+        center_y=center,
+        radius_px=radius_px,
+    )
+    raining_now = _has_significant_wet_area(total, wet)
 
     eta_minutes: int | None
     clear_eta_minutes: int | None
