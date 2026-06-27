@@ -22,7 +22,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up RainViewer image entities."""
     coordinator = config_entry.runtime_data
-    async_add_entities([RainViewerRadarMapImage(coordinator, config_entry)])
+    async_add_entities(
+        [
+            RainViewerRadarMapImage(coordinator, config_entry),
+            RainViewerRadarOverlayImage(coordinator, config_entry),
+        ]
+    )
 
 
 class RainViewerRadarMapImage(
@@ -90,3 +95,22 @@ class RainViewerRadarMapImage(
             "longitude": self.coordinator.longitude,
             "zoom": self.coordinator.zoom,
         }
+
+
+class RainViewerRadarOverlayImage(RainViewerRadarMapImage):
+    """Latest RainViewer radar overlay image without a base map."""
+
+    _attr_name = "Radar Overlay"
+
+    def __init__(
+        self,
+        coordinator: RainViewerCoordinator,
+        entry: RainViewerConfigEntry,
+    ) -> None:
+        """Initialise the image entity."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_radar_overlay"
+
+    async def async_image(self) -> bytes | None:
+        """Return latest raw radar overlay image bytes."""
+        return self.coordinator.radar_overlay

@@ -43,6 +43,7 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
         self._session = async_get_clientsession(hass=hass)
         self._base_tile_cache: dict[tuple[int, int, int], bytes] = {}
         self.radar_image: bytes | None = None
+        self.radar_overlay: bytes | None = None
         self.radar_image_last_updated: datetime | None = None
         super().__init__(
             hass,
@@ -109,6 +110,7 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
         )
 
         if tiles:
+            self.radar_overlay = tiles[-1]
             try:
                 base_tiles = []
                 for tile_x, tile_y, x_offset, y_offset in base_map_tile_requests(
@@ -137,7 +139,7 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
                 )
             except Exception:
                 _LOGGER.exception("Could not render radar map image")
-                self.radar_image = tiles[-1]
+                self.radar_image = self.radar_overlay
 
             self.radar_image_last_updated = result.frame_time
 
