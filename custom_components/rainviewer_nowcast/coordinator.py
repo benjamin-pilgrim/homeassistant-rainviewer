@@ -20,6 +20,7 @@ from .analysis import (
     render_radar_animation_map,
     render_radar_animation_overlay,
     render_radar_map,
+    suppress_static_clutter_tiles,
 )
 from .api import get_osm_tile, get_radar_tile, get_weather_maps
 from .const import (
@@ -120,6 +121,8 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
             analysis_tiles.append(analysis_tile)
             display_tiles.append(display_tile)
             frame_times.append(frame.time)
+
+        display_tiles = suppress_static_clutter_tiles(display_tiles)
 
         result = analyse_nowcast(
             tiles=analysis_tiles,

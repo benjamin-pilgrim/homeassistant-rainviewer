@@ -74,6 +74,8 @@ The integration creates:
   color table to a relative intensity mask.
 - Display images use smoothed Universal Blue rain tiles without separate snow
   coloring (`2/1_0`) so the visual palette matches the analysis palette.
+- Persistent low-intensity pixels in the same location across recent frames are
+  suppressed as likely stationary radar clutter before analysis and rendering.
 - The image entities refresh when the RainViewer frame changes. `Radar Map`
   uses OpenStreetMap tiles as a visual base map; `Radar Overlay` is the raw
   RainViewer overlay.
