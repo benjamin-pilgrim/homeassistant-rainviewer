@@ -58,9 +58,6 @@ _PALETTE_QUANT_BITS = 5
 _PALETTE_QUANT_SIZE = 1 << _PALETTE_QUANT_BITS
 _PALETTE_SHIFT = 8 - _PALETTE_QUANT_BITS
 _PALETTE_LUT: list[int] | None = None
-_STATIC_CLUTTER_MAX_INTENSITY = 60
-_STATIC_CLUTTER_MIN_RATIO = 0.65
-_STATIC_CLUTTER_MIN_FRAMES = 3
 
 # RainViewer color scheme 2 "Universal Blue" rain ramp from the published API
 # color table. Values are relative 0-255 intensity, not rainfall rate.
@@ -153,36 +150,6 @@ def _decode_intensity(tile: bytes, size: int) -> list[int]:
         return [_rgba_intensity(pixel) for pixel in rgba.getdata()]
 
 
-def suppress_static_clutter_tiles(radar_tiles: list[bytes]) -> list[bytes]:
-    """Remove persistent low-intensity stationary clutter from radar tiles."""
-    if len(radar_tiles) < _STATIC_CLUTTER_MIN_FRAMES:
-        return radar_tiles
-
-    masks = [_decode_intensity(tile, TILE_SIZE) for tile in radar_tiles]
-    static_clutter = _static_clutter_mask(masks)
-    if not any(static_clutter):
-        return radar_tiles
-
-    cleaned_tiles = []
-    for tile, mask in zip(radar_tiles, masks, strict=True):
-        with Image.open(BytesIO(tile)) as image:
-            radar = image.convert("RGBA")
-
-        pixels = list(radar.getdata())
-        radar.putdata(
-            [
-                (red, green, blue, 0)
-                if static_clutter[index]
-                and mask[index] <= _STATIC_CLUTTER_MAX_INTENSITY
-                else (red, green, blue, alpha)
-                for index, (red, green, blue, alpha) in enumerate(pixels)
-            ]
-        )
-        cleaned_tiles.append(_encode_png(radar))
-
-    return cleaned_tiles
-
-
 def _rgba_intensity(pixel: tuple[int, int, int, int]) -> int:
     """Return relative precipitation intensity for a RainViewer RGBA pixel."""
     red, green, blue, alpha = pixel
@@ -266,46 +233,6 @@ def _palette_intensity(red: int, green: int, blue: int) -> int:
             best_intensity = start_value + (end_value - start_value) * position
 
     return round(best_intensity)
-
-
-def _suppress_static_clutter_masks(masks: list[list[int]]) -> list[list[int]]:
-    """Return intensity masks with persistent low-intensity clutter removed."""
-    if len(masks) < _STATIC_CLUTTER_MIN_FRAMES:
-        return masks
-
-    static_clutter = _static_clutter_mask(masks)
-    if not any(static_clutter):
-        return masks
-
-    return [
-        [
-            0
-            if static_clutter[index] and value <= _STATIC_CLUTTER_MAX_INTENSITY
-            else value
-            for index, value in enumerate(mask)
-        ]
-        for mask in masks
-    ]
-
-
-def _static_clutter_mask(masks: list[list[int]]) -> list[bool]:
-    """Return pixels that are low intensity in the same place over time."""
-    if not masks:
-        return []
-
-    length = len(masks[0])
-    low_hit_counts = [0] * length
-    minimum_hits = max(
-        _STATIC_CLUTTER_MIN_FRAMES,
-        math.ceil(len(masks) * _STATIC_CLUTTER_MIN_RATIO),
-    )
-
-    for mask in masks:
-        for index, value in enumerate(mask):
-            if 0 < value <= _STATIC_CLUTTER_MAX_INTENSITY:
-                low_hit_counts[index] += 1
-
-    return [hits >= minimum_hits for hits in low_hit_counts]
 
 
 def _pixel(mask: list[int], size: int, x_coord: int, y_coord: int) -> int:
@@ -790,13 +717,8 @@ def analyse_nowcast(
             frame_count=0,
         )
 
-    analysis_masks = _suppress_static_clutter_masks(
-        [_decode_intensity(tile, ANALYSIS_SIZE) for tile in tiles]
-    )
-    full_size_masks = _suppress_static_clutter_masks(
-        [_decode_intensity(tile, TILE_SIZE) for tile in tiles]
-    )
-    latest_mask = full_size_masks[-1]
+    analysis_masks = [_decode_intensity(tile, ANALYSIS_SIZE) for tile in tiles]
+    latest_mask = _decode_intensity(tiles[-1], TILE_SIZE)
     motion = _estimate_motion(analysis_masks, latitude, zoom)
 
     radius_px = radius_km / (_meters_per_pixel(latitude, zoom) / 1000)
