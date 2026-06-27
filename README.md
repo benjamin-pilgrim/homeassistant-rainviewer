@@ -69,6 +69,11 @@ The integration creates:
 - Showers can grow, decay, split, or evaporate before reaching the ground.
 - RainViewer is used as an aggregate radar mosaic; individual station data is
   not required for the first version.
+- Analysis uses unsmoothed RainViewer Universal Blue rain tiles without separate
+  snow coloring (`2/0_0`) and converts pixels through the published RainViewer
+  color table to a relative intensity mask.
+- Display images use smoothed Universal Blue rain tiles without separate snow
+  coloring (`2/1_0`) so the visual palette matches the analysis palette.
 - The image entities refresh when the RainViewer frame changes. `Radar Map`
   uses OpenStreetMap tiles as a visual base map; `Radar Overlay` is the raw
   RainViewer overlay.

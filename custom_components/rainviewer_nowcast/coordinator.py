@@ -92,23 +92,37 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
         """Fetch the latest radar data and derive a nowcast."""
         maps = await get_weather_maps(self._session)
         frames = maps.frames[-7:]
-        tiles = []
+        analysis_tiles = []
+        display_tiles = []
         frame_times = []
 
         for frame in frames:
-            tile = await get_radar_tile(
+            analysis_tile = await get_radar_tile(
                 self._session,
                 maps.host,
                 frame,
                 self.latitude,
                 self.longitude,
                 self.zoom,
+                smooth=False,
+                snow=False,
             )
-            tiles.append(tile)
+            display_tile = await get_radar_tile(
+                self._session,
+                maps.host,
+                frame,
+                self.latitude,
+                self.longitude,
+                self.zoom,
+                smooth=True,
+                snow=False,
+            )
+            analysis_tiles.append(analysis_tile)
+            display_tiles.append(display_tile)
             frame_times.append(frame.time)
 
         result = analyse_nowcast(
-            tiles=tiles,
+            tiles=analysis_tiles,
             frame_times=frame_times,
             generated=maps.generated,
             latitude=self.latitude,
@@ -117,13 +131,13 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
             horizon_minutes=self.horizon_minutes,
         )
 
-        if tiles:
-            self.radar_overlay = tiles[-1]
+        if display_tiles:
+            self.radar_overlay = display_tiles[-1]
             self.radar_animation_overlay = render_radar_animation_overlay(
-                radar_tiles=tiles
+                radar_tiles=display_tiles
             )
             self.nowcast_animation_overlay = render_nowcast_animation_overlay(
-                radar_tiles=tiles,
+                radar_tiles=display_tiles,
                 motion=result.motion,
                 horizon_minutes=self.horizon_minutes,
             )
@@ -150,15 +164,15 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
                         )
                     )
                 self.radar_image = render_radar_map(
-                    radar_tile=tiles[-1],
+                    radar_tile=display_tiles[-1],
                     base_tiles=base_tiles,
                 )
                 self.radar_animation = render_radar_animation_map(
-                    radar_tiles=tiles,
+                    radar_tiles=display_tiles,
                     base_tiles=base_tiles,
                 )
                 self.nowcast_animation = render_nowcast_animation_map(
-                    radar_tiles=tiles,
+                    radar_tiles=display_tiles,
                     base_tiles=base_tiles,
                     motion=result.motion,
                     horizon_minutes=self.horizon_minutes,

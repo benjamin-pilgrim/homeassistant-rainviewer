@@ -52,11 +52,187 @@ class BaseMapTile:
     y_offset: int
 
 
-def _decode_alpha(tile: bytes, size: int) -> list[int]:
-    """Decode a tile to an alpha/intensity mask."""
+_INTENSITY_ALPHA_THRESHOLD = 24
+_INTENSITY_WET_THRESHOLD = 18
+_PALETTE_QUANT_BITS = 5
+_PALETTE_QUANT_SIZE = 1 << _PALETTE_QUANT_BITS
+_PALETTE_SHIFT = 8 - _PALETTE_QUANT_BITS
+_PALETTE_LUT: list[int] | None = None
+
+# RainViewer color scheme 2 "Universal Blue" rain ramp from the published API
+# color table. Values are relative 0-255 intensity, not rainfall rate.
+_INTENSITY_RAMP: tuple[tuple[tuple[int, int, int], int], ...] = (
+    ((99, 97, 89), 1),  # -10 dBZ, alpha 20
+    ((102, 99, 90), 2),  # -9 dBZ, alpha 25
+    ((105, 102, 92), 5),  # -8 dBZ, alpha 30
+    ((108, 104, 93), 7),  # -7 dBZ, alpha 36
+    ((111, 107, 95), 10),  # -6 dBZ, alpha 41
+    ((114, 110, 97), 12),  # -5 dBZ, alpha 46
+    ((117, 112, 98), 15),  # -4 dBZ, alpha 52
+    ((120, 115, 100), 17),  # -3 dBZ, alpha 57
+    ((124, 117, 101), 19),  # -2 dBZ, alpha 62
+    ((127, 120, 103), 22),  # -1 dBZ, alpha 68
+    ((130, 123, 105), 24),  # 0 dBZ, alpha 73
+    ((133, 125, 106), 27),  # 1 dBZ, alpha 78
+    ((136, 128, 108), 29),  # 2 dBZ, alpha 84
+    ((139, 130, 109), 32),  # 3 dBZ, alpha 89
+    ((142, 133, 111), 34),  # 4 dBZ, alpha 94
+    ((146, 136, 113), 36),  # 5 dBZ, alpha 100
+    ((158, 147, 117), 39),  # 6 dBZ, alpha 110
+    ((170, 158, 121), 41),  # 7 dBZ, alpha 120
+    ((182, 169, 126), 44),  # 8 dBZ, alpha 130
+    ((194, 180, 130), 46),  # 9 dBZ, alpha 140
+    ((206, 192, 135), 49),  # 10 dBZ, alpha 150
+    ((210, 196, 139), 51),  # 11 dBZ, alpha 160
+    ((214, 200, 143), 53),  # 12 dBZ, alpha 170
+    ((218, 204, 147), 56),  # 13 dBZ, alpha 180
+    ((222, 208, 151), 58),  # 14 dBZ, alpha 190
+    ((136, 221, 238), 61),  # 15 dBZ, alpha 255
+    ((108, 209, 235), 63),  # 16 dBZ, alpha 255
+    ((81, 197, 232), 66),  # 17 dBZ, alpha 255
+    ((54, 186, 229), 68),  # 18 dBZ, alpha 255
+    ((27, 174, 226), 70),  # 19 dBZ, alpha 255
+    ((0, 163, 224), 73),  # 20 dBZ, alpha 255
+    ((0, 154, 213), 75),  # 21 dBZ, alpha 255
+    ((0, 145, 202), 78),  # 22 dBZ, alpha 255
+    ((0, 136, 191), 80),  # 23 dBZ, alpha 255
+    ((0, 127, 180), 83),  # 24 dBZ, alpha 255
+    ((0, 119, 170), 85),  # 25 dBZ, alpha 255
+    ((0, 112, 163), 87),  # 26 dBZ, alpha 255
+    ((0, 105, 156), 90),  # 27 dBZ, alpha 255
+    ((0, 98, 149), 92),  # 28 dBZ, alpha 255
+    ((0, 91, 142), 95),  # 29 dBZ, alpha 255
+    ((0, 85, 136), 97),  # 30 dBZ, alpha 255
+    ((0, 81, 128), 100),  # 31 dBZ, alpha 255
+    ((0, 78, 120), 102),  # 32 dBZ, alpha 255
+    ((0, 74, 112), 104),  # 33 dBZ, alpha 255
+    ((0, 71, 104), 107),  # 34 dBZ, alpha 255
+    ((255, 238, 0), 109),  # 35 dBZ, alpha 255
+    ((255, 224, 0), 112),  # 36 dBZ, alpha 255
+    ((255, 210, 0), 114),  # 37 dBZ, alpha 255
+    ((255, 197, 0), 117),  # 38 dBZ, alpha 255
+    ((255, 183, 0), 119),  # 39 dBZ, alpha 255
+    ((255, 170, 0), 121),  # 40 dBZ, alpha 255
+    ((255, 159, 0), 124),  # 41 dBZ, alpha 255
+    ((255, 149, 0), 126),  # 42 dBZ, alpha 255
+    ((255, 139, 0), 129),  # 43 dBZ, alpha 255
+    ((255, 129, 0), 131),  # 44 dBZ, alpha 255
+    ((255, 68, 0), 134),  # 45 dBZ, alpha 255
+    ((242, 54, 0), 136),  # 46 dBZ, alpha 255
+    ((230, 40, 0), 138),  # 47 dBZ, alpha 255
+    ((217, 27, 0), 141),  # 48 dBZ, alpha 255
+    ((205, 13, 0), 143),  # 49 dBZ, alpha 255
+    ((193, 0, 0), 146),  # 50 dBZ, alpha 255
+    ((168, 0, 0), 148),  # 51 dBZ, alpha 255
+    ((143, 0, 0), 151),  # 52 dBZ, alpha 255
+    ((118, 0, 0), 153),  # 53 dBZ, alpha 255
+    ((93, 0, 0), 155),  # 54 dBZ, alpha 255
+    ((255, 170, 255), 158),  # 55 dBZ, alpha 255
+    ((255, 159, 255), 160),  # 56 dBZ, alpha 255
+    ((255, 149, 255), 163),  # 57 dBZ, alpha 255
+    ((255, 139, 255), 165),  # 58 dBZ, alpha 255
+    ((255, 129, 255), 168),  # 59 dBZ, alpha 255
+    ((255, 119, 255), 170),  # 60 dBZ, alpha 255
+    ((255, 108, 255), 172),  # 61 dBZ, alpha 255
+    ((255, 98, 255), 175),  # 62 dBZ, alpha 255
+    ((255, 88, 255), 177),  # 63 dBZ, alpha 255
+    ((255, 78, 255), 180),  # 64 dBZ, alpha 255
+    ((255, 255, 255), 182),  # 65 dBZ, alpha 255
+    ((0, 255, 0), 206),  # 75 dBZ, alpha 255
+    ((0, 255, 0), 255),  # 95 dBZ, alpha 255
+)
+
+
+def _decode_intensity(tile: bytes, size: int) -> list[int]:
+    """Decode a tile to a relative 0-255 precipitation-intensity mask."""
     with Image.open(BytesIO(tile)) as image:
         rgba = image.convert("RGBA").resize((size, size), Image.Resampling.BILINEAR)
-        return list(rgba.getchannel("A").getdata())
+        return [_rgba_intensity(pixel) for pixel in rgba.getdata()]
+
+
+def _rgba_intensity(pixel: tuple[int, int, int, int]) -> int:
+    """Return relative precipitation intensity for a RainViewer RGBA pixel."""
+    red, green, blue, alpha = pixel
+    if alpha <= _INTENSITY_ALPHA_THRESHOLD or (red < 4 and green < 4 and blue < 4):
+        return 0
+
+    lut = _palette_lut()
+    index = (
+        (red >> _PALETTE_SHIFT) * _PALETTE_QUANT_SIZE * _PALETTE_QUANT_SIZE
+        + (green >> _PALETTE_SHIFT) * _PALETTE_QUANT_SIZE
+        + (blue >> _PALETTE_SHIFT)
+    )
+    return round(lut[index] * alpha / 255)
+
+
+def _palette_lut() -> list[int]:
+    """Return a quantized RGB lookup table for the intensity ramp."""
+    global _PALETTE_LUT
+    if _PALETTE_LUT is not None:
+        return _PALETTE_LUT
+
+    lut = []
+    half_bin = 1 << (_PALETTE_SHIFT - 1)
+    for red_q in range(_PALETTE_QUANT_SIZE):
+        red = min(255, (red_q << _PALETTE_SHIFT) + half_bin)
+        for green_q in range(_PALETTE_QUANT_SIZE):
+            green = min(255, (green_q << _PALETTE_SHIFT) + half_bin)
+            for blue_q in range(_PALETTE_QUANT_SIZE):
+                blue = min(255, (blue_q << _PALETTE_SHIFT) + half_bin)
+                lut.append(_palette_intensity(red, green, blue))
+
+    _PALETTE_LUT = lut
+    return lut
+
+
+def _palette_intensity(red: int, green: int, blue: int) -> int:
+    """Return interpolated intensity for an RGB color."""
+    best_distance: float | None = None
+    best_intensity = 0.0
+
+    for (start_rgb, start_value), (end_rgb, end_value) in zip(
+        _INTENSITY_RAMP,
+        _INTENSITY_RAMP[1:],
+        strict=False,
+    ):
+        segment = (
+            end_rgb[0] - start_rgb[0],
+            end_rgb[1] - start_rgb[1],
+            end_rgb[2] - start_rgb[2],
+        )
+        point = (
+            red - start_rgb[0],
+            green - start_rgb[1],
+            blue - start_rgb[2],
+        )
+        segment_length_sq = (
+            segment[0] ** 2 + segment[1] ** 2 + segment[2] ** 2
+        )
+        if segment_length_sq == 0:
+            continue
+
+        position = (
+            point[0] * segment[0]
+            + point[1] * segment[1]
+            + point[2] * segment[2]
+        ) / segment_length_sq
+        position = max(0.0, min(1.0, position))
+        projected = (
+            start_rgb[0] + segment[0] * position,
+            start_rgb[1] + segment[1] * position,
+            start_rgb[2] + segment[2] * position,
+        )
+        distance = (
+            (red - projected[0]) ** 2
+            + (green - projected[1]) ** 2
+            + (blue - projected[2]) ** 2
+        )
+
+        if best_distance is None or distance < best_distance:
+            best_distance = distance
+            best_intensity = start_value + (end_value - start_value) * position
+
+    return round(best_intensity)
 
 
 def _pixel(mask: list[int], size: int, x_coord: int, y_coord: int) -> int:
@@ -450,7 +626,7 @@ def _coverage_percent(mask: list[int], radius_px: float) -> float:
             if (x_coord - center) ** 2 + (y_coord - center) ** 2 > radius**2:
                 continue
             total += 1
-            if _pixel(mask, TILE_SIZE, x_coord, y_coord) > 24:
+            if _pixel(mask, TILE_SIZE, x_coord, y_coord) > _INTENSITY_WET_THRESHOLD:
                 wet += 1
 
     if total == 0:
@@ -491,7 +667,7 @@ def _project_rain_window(
                     round(source_center_x + x_offset),
                     round(source_center_y + y_offset),
                 )
-                if value > 24:
+                if value > _INTENSITY_WET_THRESHOLD:
                     hit = True
                     break
             if hit:
@@ -541,8 +717,8 @@ def analyse_nowcast(
             frame_count=0,
         )
 
-    analysis_masks = [_decode_alpha(tile, ANALYSIS_SIZE) for tile in tiles]
-    latest_mask = _decode_alpha(tiles[-1], TILE_SIZE)
+    analysis_masks = [_decode_intensity(tile, ANALYSIS_SIZE) for tile in tiles]
+    latest_mask = _decode_intensity(tiles[-1], TILE_SIZE)
     motion = _estimate_motion(analysis_masks, latitude, zoom)
 
     radius_px = radius_km / (_meters_per_pixel(latitude, zoom) / 1000)

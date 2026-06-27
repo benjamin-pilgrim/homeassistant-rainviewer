@@ -54,11 +54,14 @@ async def get_radar_tile(
     latitude: float,
     longitude: float,
     zoom: int,
+    *,
+    smooth: bool = True,
+    snow: bool = False,
 ) -> bytes:
     """Return a coordinate-centered RainViewer radar tile."""
     url = (
         f"{host}{frame.path}/{TILE_SIZE}/{zoom}/"
-        f"{latitude:.6f}/{longitude:.6f}/2/1_1.png"
+        f"{latitude:.6f}/{longitude:.6f}/2/{int(smooth)}_{int(snow)}.png"
     )
     response = await session.get(
         url,
