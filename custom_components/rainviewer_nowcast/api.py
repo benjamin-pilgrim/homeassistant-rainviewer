@@ -67,3 +67,19 @@ async def get_radar_tile(
     )
     return await response.read()
 
+
+async def get_osm_tile(
+    session: aiohttp.ClientSession,
+    zoom: int,
+    tile_x: int,
+    tile_y: int,
+) -> bytes:
+    """Return an OpenStreetMap base-map tile."""
+    url = f"https://tile.openstreetmap.org/{zoom}/{tile_x}/{tile_y}.png"
+    response = await session.get(
+        url,
+        headers={"User-Agent": "Home Assistant RainViewer Nowcast"},
+        raise_for_status=True,
+        timeout=aiohttp.ClientTimeout(total=30),
+    )
+    return await response.read()

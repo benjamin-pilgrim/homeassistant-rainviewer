@@ -5,7 +5,7 @@ from homeassistant.core import HomeAssistant
 
 from .coordinator import RainViewerConfigEntry, RainViewerCoordinator
 
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.IMAGE, Platform.SENSOR]
 
 
 async def async_setup_entry(
@@ -24,4 +24,3 @@ async def async_unload_entry(
 ) -> bool:
     """Unload RainViewer Nowcast."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-

@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 import math
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from .const import ANALYSIS_SIZE, TILE_SIZE
 
@@ -41,6 +41,15 @@ class NowcastResult:
     frame_count: int
 
 
+@dataclass(slots=True, frozen=True)
+class BaseMapTile:
+    """A base-map tile and its placement in the radar viewport."""
+
+    data: bytes
+    x_offset: int
+    y_offset: int
+
+
 def _decode_alpha(tile: bytes, size: int) -> list[int]:
     """Decode a tile to an alpha/intensity mask."""
     with Image.open(BytesIO(tile)) as image:
@@ -58,6 +67,111 @@ def _pixel(mask: list[int], size: int, x_coord: int, y_coord: int) -> int:
 def _meters_per_pixel(latitude: float, zoom: int) -> float:
     """Return approximate Web Mercator meters per pixel at latitude."""
     return 156543.03392804097 * math.cos(math.radians(latitude)) / (2**zoom)
+
+
+def _latlon_to_world_pixels(
+    latitude: float,
+    longitude: float,
+    zoom: int,
+    tile_size: int = 256,
+) -> tuple[float, float]:
+    """Return Web Mercator world-pixel coordinates for a lat/lon."""
+    sin_lat = math.sin(math.radians(latitude))
+    sin_lat = min(max(sin_lat, -0.9999), 0.9999)
+    scale = tile_size * (2**zoom)
+    x_coord = (longitude + 180) / 360 * scale
+    y_coord = (
+        0.5 - math.log((1 + sin_lat) / (1 - sin_lat)) / (4 * math.pi)
+    ) * scale
+    return x_coord, y_coord
+
+
+def base_map_tile_requests(
+    latitude: float,
+    longitude: float,
+    zoom: int,
+) -> list[tuple[int, int, int, int]]:
+    """Return OSM tile x/y values and viewport offsets for a centered image."""
+    center_x, center_y = _latlon_to_world_pixels(latitude, longitude, zoom)
+    left = center_x - TILE_SIZE / 2
+    top = center_y - TILE_SIZE / 2
+    osm_tile_size = 256
+    requests: list[tuple[int, int, int, int]] = []
+
+    for tile_x in range(
+        math.floor(left / osm_tile_size),
+        math.floor((left + TILE_SIZE - 1) / osm_tile_size) + 1,
+    ):
+        for tile_y in range(
+            math.floor(top / osm_tile_size),
+            math.floor((top + TILE_SIZE - 1) / osm_tile_size) + 1,
+        ):
+            requests.append(
+                (
+                    tile_x,
+                    tile_y,
+                    round(tile_x * osm_tile_size - left),
+                    round(tile_y * osm_tile_size - top),
+                )
+            )
+
+    return requests
+
+
+def render_radar_map(
+    *,
+    radar_tile: bytes,
+    base_tiles: list[BaseMapTile],
+) -> bytes:
+    """Render a 512px radar map image from base-map tiles and radar overlay."""
+    canvas = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (238, 242, 244, 255))
+
+    for base_tile in base_tiles:
+        with Image.open(BytesIO(base_tile.data)) as image:
+            canvas.alpha_composite(
+                image.convert("RGBA"),
+                (base_tile.x_offset, base_tile.y_offset),
+            )
+
+    with Image.open(BytesIO(radar_tile)) as image:
+        radar = image.convert("RGBA")
+
+    pixels = radar.load()
+    for y_coord in range(radar.height):
+        for x_coord in range(radar.width):
+            red, green, blue, alpha = pixels[x_coord, y_coord]
+            if alpha and red < 4 and green < 4 and blue < 4:
+                pixels[x_coord, y_coord] = (red, green, blue, 0)
+
+    canvas.alpha_composite(radar)
+
+    draw = ImageDraw.Draw(canvas)
+    center = TILE_SIZE // 2
+    draw.line(
+        (center - 16, center, center + 16, center),
+        fill=(176, 0, 0, 255),
+        width=3,
+    )
+    draw.line(
+        (center, center - 16, center, center + 16),
+        fill=(176, 0, 0, 255),
+        width=3,
+    )
+    draw.ellipse(
+        (center - 10, center - 10, center + 10, center + 10),
+        outline=(255, 255, 255, 255),
+        width=4,
+    )
+    draw.ellipse(
+        (center - 5, center - 5, center + 5, center + 5),
+        fill=(255, 255, 255, 255),
+        outline=(176, 0, 0, 255),
+        width=2,
+    )
+
+    output = BytesIO()
+    canvas.save(output, format="PNG")
+    return output.getvalue()
 
 
 def _direction_from_bearing(bearing: float) -> str:

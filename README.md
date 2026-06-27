@@ -50,6 +50,7 @@ The integration creates:
 | `sensor.rain_frame_age` | Age of the latest RainViewer radar frame. |
 | `sensor.rain_now_coverage` | Percentage of pixels with precipitation inside the detection radius. |
 | `sensor.rain_nowcast_confidence` | Simple confidence score from motion consistency and projected hits. |
+| `image.radar_map` | Latest 512px radar map image with an OpenStreetMap base layer, RainViewer radar overlay, and center marker. |
 
 ## Notes
 
@@ -58,4 +59,5 @@ The integration creates:
 - Showers can grow, decay, split, or evaporate before reaching the ground.
 - RainViewer is used as an aggregate radar mosaic; individual station data is
   not required for the first version.
-
+- The image entity refreshes when the RainViewer frame changes. It uses
+  OpenStreetMap tiles as a visual base map.

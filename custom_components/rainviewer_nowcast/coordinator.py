@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -10,8 +10,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .analysis import NowcastResult, analyse_nowcast
-from .api import get_radar_tile, get_weather_maps
+from .analysis import (
+    BaseMapTile,
+    NowcastResult,
+    analyse_nowcast,
+    base_map_tile_requests,
+    render_radar_map,
+)
+from .api import get_osm_tile, get_radar_tile, get_weather_maps
 from .const import (
     CONF_HORIZON_MINUTES,
     CONF_LATITUDE,
@@ -35,6 +41,9 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
         """Initialize."""
         self._entry = entry
         self._session = async_get_clientsession(hass=hass)
+        self._base_tile_cache: dict[tuple[int, int, int], bytes] = {}
+        self.radar_image: bytes | None = None
+        self.radar_image_last_updated: datetime | None = None
         super().__init__(
             hass,
             _LOGGER,
@@ -89,7 +98,7 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
             tiles.append(tile)
             frame_times.append(frame.time)
 
-        return analyse_nowcast(
+        result = analyse_nowcast(
             tiles=tiles,
             frame_times=frame_times,
             generated=maps.generated,
@@ -99,3 +108,37 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
             horizon_minutes=self.horizon_minutes,
         )
 
+        if tiles:
+            try:
+                base_tiles = []
+                for tile_x, tile_y, x_offset, y_offset in base_map_tile_requests(
+                    self.latitude,
+                    self.longitude,
+                    self.zoom,
+                ):
+                    cache_key = (self.zoom, tile_x, tile_y)
+                    if cache_key not in self._base_tile_cache:
+                        self._base_tile_cache[cache_key] = await get_osm_tile(
+                            self._session,
+                            self.zoom,
+                            tile_x,
+                            tile_y,
+                        )
+                    base_tiles.append(
+                        BaseMapTile(
+                            data=self._base_tile_cache[cache_key],
+                            x_offset=x_offset,
+                            y_offset=y_offset,
+                        )
+                    )
+                self.radar_image = render_radar_map(
+                    radar_tile=tiles[-1],
+                    base_tiles=base_tiles,
+                )
+            except Exception:
+                _LOGGER.exception("Could not render radar map image")
+                self.radar_image = tiles[-1]
+
+            self.radar_image_last_updated = result.frame_time
+
+        return result
