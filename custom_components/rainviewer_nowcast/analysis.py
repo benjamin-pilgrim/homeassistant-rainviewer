@@ -139,9 +139,50 @@ def render_radar_animation_map(
     return _encode_apng(frames)
 
 
+def render_nowcast_animation_map(
+    *,
+    radar_tiles: list[bytes],
+    base_tiles: list[BaseMapTile],
+    motion: MotionVector | None,
+    horizon_minutes: int,
+) -> bytes | None:
+    """Render observed radar frames followed by low-opacity projected frames."""
+    frames = [_render_radar_frame(tile, base_tiles) for tile in radar_tiles]
+    future_overlays = _projected_radar_images(
+        radar_tiles[-1] if radar_tiles else None,
+        motion=motion,
+        horizon_minutes=horizon_minutes,
+    )
+    for overlay in future_overlays:
+        frame = _render_base_frame(base_tiles)
+        frame.alpha_composite(overlay)
+        _draw_center_marker(frame)
+        frames.append(frame)
+
+    return _encode_apng(frames)
+
+
 def render_radar_animation_overlay(*, radar_tiles: list[bytes]) -> bytes | None:
     """Render an animated transparent radar overlay from recent frames."""
     frames = [_radar_image(tile) for tile in radar_tiles]
+    return _encode_apng(frames)
+
+
+def render_nowcast_animation_overlay(
+    *,
+    radar_tiles: list[bytes],
+    motion: MotionVector | None,
+    horizon_minutes: int,
+) -> bytes | None:
+    """Render observed overlays followed by low-opacity projected overlays."""
+    frames = [_radar_image(tile) for tile in radar_tiles]
+    frames.extend(
+        _projected_radar_images(
+            radar_tiles[-1] if radar_tiles else None,
+            motion=motion,
+            horizon_minutes=horizon_minutes,
+        )
+    )
     return _encode_apng(frames)
 
 
@@ -150,6 +191,14 @@ def _render_radar_frame(
     base_tiles: list[BaseMapTile],
 ) -> Image.Image:
     """Render a single radar frame over the base map."""
+    canvas = _render_base_frame(base_tiles)
+    canvas.alpha_composite(_radar_image(radar_tile))
+    _draw_center_marker(canvas)
+    return canvas
+
+
+def _render_base_frame(base_tiles: list[BaseMapTile]) -> Image.Image:
+    """Render only the base map for a radar frame."""
     canvas = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (238, 242, 244, 255))
 
     for base_tile in base_tiles:
@@ -159,9 +208,12 @@ def _render_radar_frame(
                 (base_tile.x_offset, base_tile.y_offset),
             )
 
-    canvas.alpha_composite(_radar_image(radar_tile))
+    return canvas
 
-    draw = ImageDraw.Draw(canvas)
+
+def _draw_center_marker(image: Image.Image) -> None:
+    """Draw the configured location marker."""
+    draw = ImageDraw.Draw(image)
     center = TILE_SIZE // 2
     draw.line(
         (center - 16, center, center + 16, center),
@@ -185,8 +237,6 @@ def _render_radar_frame(
         width=2,
     )
 
-    return canvas
-
 
 def _radar_image(radar_tile: bytes) -> Image.Image:
     """Return a RainViewer radar tile with black background made transparent."""
@@ -201,6 +251,57 @@ def _radar_image(radar_tile: bytes) -> Image.Image:
                 pixels[x_coord, y_coord] = (red, green, blue, 0)
 
     return radar
+
+
+def _projected_radar_images(
+    radar_tile: bytes | None,
+    *,
+    motion: MotionVector | None,
+    horizon_minutes: int,
+) -> list[Image.Image]:
+    """Return low-opacity future radar frames shifted from the latest frame."""
+    if radar_tile is None or motion is None:
+        return []
+
+    radar = _radar_image(radar_tile)
+    radar = _with_scaled_alpha(radar, 0.38)
+    frames: list[Image.Image] = []
+    for minutes in range(5, min(horizon_minutes, 30) + 1, 5):
+        factor = minutes / 10
+        frames.append(
+            _shift_image_no_wrap(
+                radar,
+                round(motion.dx_px_per_10min * factor),
+                round(motion.dy_px_per_10min * factor),
+            )
+        )
+    return frames
+
+
+def _with_scaled_alpha(image: Image.Image, scale: float) -> Image.Image:
+    """Return an image with its alpha channel scaled."""
+    result = image.copy()
+    alpha = result.getchannel("A").point(lambda value: round(value * scale))
+    result.putalpha(alpha)
+    return result
+
+
+def _shift_image_no_wrap(image: Image.Image, dx: int, dy: int) -> Image.Image:
+    """Shift an image without wrapping pixels around the viewport edges."""
+    result = Image.new(image.mode, image.size, (0, 0, 0, 0))
+    width, height = image.size
+
+    source_left = max(0, -dx)
+    source_top = max(0, -dy)
+    source_right = min(width, width - dx)
+    source_bottom = min(height, height - dy)
+
+    if source_left >= source_right or source_top >= source_bottom:
+        return result
+
+    crop = image.crop((source_left, source_top, source_right, source_bottom))
+    result.paste(crop, (max(0, dx), max(0, dy)))
+    return result
 
 
 def _encode_png(image: Image.Image) -> bytes:

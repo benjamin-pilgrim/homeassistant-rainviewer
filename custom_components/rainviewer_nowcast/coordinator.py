@@ -15,6 +15,8 @@ from .analysis import (
     NowcastResult,
     analyse_nowcast,
     base_map_tile_requests,
+    render_nowcast_animation_map,
+    render_nowcast_animation_overlay,
     render_radar_animation_map,
     render_radar_animation_overlay,
     render_radar_map,
@@ -48,6 +50,8 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
         self.radar_overlay: bytes | None = None
         self.radar_animation: bytes | None = None
         self.radar_animation_overlay: bytes | None = None
+        self.nowcast_animation: bytes | None = None
+        self.nowcast_animation_overlay: bytes | None = None
         self.radar_image_last_updated: datetime | None = None
         super().__init__(
             hass,
@@ -118,6 +122,11 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
             self.radar_animation_overlay = render_radar_animation_overlay(
                 radar_tiles=tiles
             )
+            self.nowcast_animation_overlay = render_nowcast_animation_overlay(
+                radar_tiles=tiles,
+                motion=result.motion,
+                horizon_minutes=self.horizon_minutes,
+            )
             try:
                 base_tiles = []
                 for tile_x, tile_y, x_offset, y_offset in base_map_tile_requests(
@@ -148,10 +157,17 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
                     radar_tiles=tiles,
                     base_tiles=base_tiles,
                 )
+                self.nowcast_animation = render_nowcast_animation_map(
+                    radar_tiles=tiles,
+                    base_tiles=base_tiles,
+                    motion=result.motion,
+                    horizon_minutes=self.horizon_minutes,
+                )
             except Exception:
                 _LOGGER.exception("Could not render radar map image")
                 self.radar_image = self.radar_overlay
                 self.radar_animation = self.radar_animation_overlay
+                self.nowcast_animation = self.nowcast_animation_overlay
 
             self.radar_image_last_updated = result.frame_time
 

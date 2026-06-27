@@ -56,6 +56,8 @@ The integration creates:
 | `image.radar_overlay` | Latest raw 512px RainViewer radar overlay without base-map tiles. |
 | `image.radar_animation` | Animated PNG loop of recent radar frames on the OpenStreetMap base layer. |
 | `image.radar_animation_overlay` | Animated PNG loop of recent radar overlays without base-map tiles. |
+| `image.rain_nowcast_animation` | Animated PNG loop with observed radar followed by low-opacity projected future frames. |
+| `image.rain_nowcast_animation_overlay` | Transparent observed-plus-projected nowcast animation without base-map tiles. |
 
 ## Notes
 
@@ -73,3 +75,6 @@ The integration creates:
 - Animation entities are APNG files served as `image/png`, preserving
   transparency for overlay use while remaining compatible with normal image
   cards in modern browsers.
+- `Radar Animation` is observed history only. `Rain Nowcast Animation` appends
+  generated future frames at low opacity so projected movement is visually
+  distinct from observed radar.
