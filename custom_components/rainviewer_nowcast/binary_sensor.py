@@ -60,6 +60,8 @@ class RainViewerBaseEntity(CoordinatorEntity[RainViewerCoordinator]):
         return {
             "raining_now": data.raining_now,
             "eta_minutes": data.eta_minutes,
+            "clear_eta_minutes": data.clear_eta_minutes,
+            "duration_minutes": data.duration_minutes,
             "confidence": data.confidence,
             "now_coverage_percent": data.now_coverage_percent,
             "frame_time": data.frame_time.isoformat() if data.frame_time else None,
@@ -109,4 +111,3 @@ class RainApproachingBinarySensor(RainViewerBaseEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return nowcast details."""
         return self._attrs
-

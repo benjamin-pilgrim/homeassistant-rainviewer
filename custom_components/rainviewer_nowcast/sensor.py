@@ -23,6 +23,8 @@ async def async_setup_entry(
     async_add_entities(
         [
             RainArrivalEtaSensor(coordinator, config_entry),
+            RainClearEtaSensor(coordinator, config_entry),
+            RainDurationSensor(coordinator, config_entry),
             RainMotionDirectionSensor(coordinator, config_entry),
             RainMotionSpeedSensor(coordinator, config_entry),
             RainFrameAgeSensor(coordinator, config_entry),
@@ -41,6 +43,8 @@ class RainViewerSensor(RainViewerBaseEntity, SensorEntity):
         """Return common attributes without duplicating the sensor state."""
         attrs = dict(self._attrs)
         attrs.pop("eta_minutes", None)
+        attrs.pop("clear_eta_minutes", None)
+        attrs.pop("duration_minutes", None)
         attrs.pop("confidence", None)
         attrs.pop("now_coverage_percent", None)
         attrs.pop("frame_age_minutes", None)
@@ -104,6 +108,64 @@ class RainMotionDirectionSensor(RainViewerBaseEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes."""
         return self._attrs
+
+
+class RainClearEtaSensor(RainViewerSensor):
+    """Estimated time until the target area clears."""
+
+    _attr_name = "Rain Clear ETA"
+    _attr_icon = "mdi:weather-sunny-alert"
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+
+    def __init__(
+        self,
+        coordinator: RainViewerCoordinator,
+        entry: RainViewerConfigEntry,
+    ) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_rain_clear_eta"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return clear ETA in minutes."""
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.clear_eta_minutes
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra attributes."""
+        return self._common_attributes()
+
+
+class RainDurationSensor(RainViewerSensor):
+    """Estimated rain duration within the forecast horizon."""
+
+    _attr_name = "Rain Duration"
+    _attr_icon = "mdi:timer-outline"
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+
+    def __init__(
+        self,
+        coordinator: RainViewerCoordinator,
+        entry: RainViewerConfigEntry,
+    ) -> None:
+        """Initialise the sensor."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_rain_duration"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return projected rain duration in minutes."""
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.duration_minutes
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra attributes."""
+        return self._common_attributes()
 
 
 class RainMotionSpeedSensor(RainViewerSensor):
@@ -220,4 +282,3 @@ class RainNowcastConfidenceSensor(RainViewerSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes."""
         return self._common_attributes()
-

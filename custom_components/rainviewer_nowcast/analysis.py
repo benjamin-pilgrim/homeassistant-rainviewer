@@ -32,6 +32,8 @@ class NowcastResult:
     rain_approaching: bool
     raining_now: bool
     eta_minutes: int | None
+    clear_eta_minutes: int | None
+    duration_minutes: int | None
     confidence: int
     now_coverage_percent: float
     frame_time: datetime | None
@@ -303,21 +305,22 @@ def _coverage_percent(mask: list[int], radius_px: float) -> float:
     return round(wet / total * 100, 1)
 
 
-def _project_arrival(
+def _project_rain_window(
     latest_mask: list[int],
     motion: MotionVector | None,
     *,
     radius_px: float,
     horizon_minutes: int,
-) -> tuple[int | None, int]:
-    """Project the latest mask forward and return ETA/confidence contribution."""
+) -> tuple[int | None, int | None, int | None, int]:
+    """Project the latest mask and return ETA, clear ETA, duration, confidence."""
     if motion is None:
-        return None, 0
+        return None, None, None, 0
 
     center = TILE_SIZE // 2
     radius = max(2, math.ceil(radius_px))
-    hit_count = 0
     first_hit: int | None = None
+    last_hit: int | None = None
+    hit_minutes: list[int] = []
 
     for minutes in range(5, horizon_minutes + 1, 5):
         factor = minutes / 10
@@ -342,11 +345,20 @@ def _project_arrival(
                 break
 
         if hit:
-            hit_count += 1
+            hit_minutes.append(minutes)
             if first_hit is None:
                 first_hit = minutes
+            last_hit = minutes
 
-    return first_hit, min(40, hit_count * 8)
+    if first_hit is None or last_hit is None:
+        return None, None, None, 0
+
+    clear_eta = last_hit + 5
+    if clear_eta > horizon_minutes:
+        clear_eta = None
+
+    duration = len(hit_minutes) * 5
+    return first_hit, clear_eta, duration, min(40, len(hit_minutes) * 8)
 
 
 def analyse_nowcast(
@@ -365,6 +377,8 @@ def analyse_nowcast(
             rain_approaching=False,
             raining_now=False,
             eta_minutes=None,
+            clear_eta_minutes=None,
+            duration_minutes=None,
             confidence=0,
             now_coverage_percent=0.0,
             frame_time=None,
@@ -383,12 +397,31 @@ def analyse_nowcast(
     raining_now = now_coverage > 0
 
     eta_minutes: int | None
+    clear_eta_minutes: int | None
+    duration_minutes: int | None
     projection_confidence: int
     if raining_now:
         eta_minutes = 0
-        projection_confidence = 35
+        _projected_eta, clear_eta_minutes, projected_duration, projection_confidence = (
+            _project_rain_window(
+                latest_mask,
+                motion,
+                radius_px=radius_px,
+                horizon_minutes=horizon_minutes,
+            )
+        )
+        duration_minutes = projected_duration
+        if duration_minutes is None:
+            duration_minutes = 5
+        if projection_confidence == 0:
+            projection_confidence = 35
     else:
-        eta_minutes, projection_confidence = _project_arrival(
+        (
+            eta_minutes,
+            clear_eta_minutes,
+            duration_minutes,
+            projection_confidence,
+        ) = _project_rain_window(
             latest_mask,
             motion,
             radius_px=radius_px,
@@ -422,6 +455,8 @@ def analyse_nowcast(
         rain_approaching=rain_approaching,
         raining_now=raining_now,
         eta_minutes=eta_minutes,
+        clear_eta_minutes=clear_eta_minutes,
+        duration_minutes=duration_minutes,
         confidence=confidence,
         now_coverage_percent=now_coverage,
         frame_time=frame_time,

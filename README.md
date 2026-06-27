@@ -45,6 +45,8 @@ The integration creates:
 |---|---|
 | `binary_sensor.rain_approaching` | On when radar echoes are projected to reach the location within the configured horizon. |
 | `sensor.rain_arrival_eta` | Estimated minutes until precipitation reaches the location. |
+| `sensor.rain_clear_eta` | Estimated minutes until the configured location clears again. |
+| `sensor.rain_duration` | Estimated wet minutes within the configured forecast horizon. |
 | `sensor.rain_motion_direction` | Compass direction the echoes are moving toward. |
 | `sensor.rain_motion_speed` | Estimated echo speed in km/h. |
 | `sensor.rain_frame_age` | Age of the latest RainViewer radar frame. |
@@ -56,6 +58,9 @@ The integration creates:
 ## Notes
 
 - This tracks radar echo motion, not ground truth rainfall.
+- `Rain Clear ETA` and `Rain Duration` are based on projecting the current radar
+  mask forward; if precipitation still intersects the target at the forecast
+  horizon, clear ETA is unknown.
 - The estimate is most useful for the next 15-45 minutes.
 - Showers can grow, decay, split, or evaporate before reaching the ground.
 - RainViewer is used as an aggregate radar mosaic; individual station data is

@@ -82,6 +82,8 @@ class RainViewerRadarMapImage(
             "raining_now": data.raining_now,
             "rain_approaching": data.rain_approaching,
             "eta_minutes": data.eta_minutes,
+            "clear_eta_minutes": data.clear_eta_minutes,
+            "duration_minutes": data.duration_minutes,
             "confidence": data.confidence,
             "now_coverage_percent": data.now_coverage_percent,
             "frame_time": data.frame_time.isoformat() if data.frame_time else None,
