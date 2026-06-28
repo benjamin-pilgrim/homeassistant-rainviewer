@@ -69,15 +69,15 @@ class RainViewerCleanRadarBoundsView(HomeAssistantView):
         zoom = _query_int(request, "zoom", coordinator.zoom)
         width = _query_int(request, "width", 1200)
         height = _query_int(request, "height", 620)
-        background_path = request.query.get("background")
+        background_name = request.query.get("background")
         radar_opacity = _query_float_default(request, "opacity", 1.0)
         _validate_bounds(north=north, south=south, east=east, west=west)
         _validate_dimensions(zoom=zoom, width=width, height=height)
         _validate_opacity(radar_opacity)
 
         background = None
-        if background_path is not None:
-            background = await _read_local_background(hass, background_path)
+        if background_name is not None:
+            background = await _read_private_background(hass, background_name)
 
         try:
             image = await coordinator.async_get_clean_radar_bounds_overlay(
@@ -165,20 +165,19 @@ def _validate_opacity(opacity: float) -> None:
         raise web.HTTPBadRequest(text="Opacity is outside bounds")
 
 
-async def _read_local_background(
+async def _read_private_background(
     hass: HomeAssistant,
-    background_path: str,
+    background_name: str,
 ) -> bytes:
-    """Read a background image from Home Assistant's public www directory."""
-    prefix = "/local/"
-    if not background_path.startswith(prefix):
-        raise web.HTTPBadRequest(text="Background must be a /local/ path")
+    """Read a background image from the integration's private data directory."""
+    relative_path = background_name.lstrip("/")
+    if relative_path.startswith(".") or Path(relative_path).is_absolute():
+        raise web.HTTPBadRequest(text="Background path is invalid")
 
-    www_root = Path(hass.config.path("www")).resolve()
-    relative_path = background_path[len(prefix) :].lstrip("/")
-    candidate = (www_root / relative_path).resolve()
+    data_root = Path(hass.config.path("rainviewer_nowcast")).resolve()
+    candidate = (data_root / relative_path).resolve()
     try:
-        candidate.relative_to(www_root)
+        candidate.relative_to(data_root)
     except ValueError as err:
         raise web.HTTPBadRequest(text="Background path is invalid") from err
     if not candidate.is_file():

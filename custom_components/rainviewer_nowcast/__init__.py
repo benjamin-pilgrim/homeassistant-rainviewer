@@ -6,7 +6,11 @@ from homeassistant.core import HomeAssistant
 from .coordinator import RainViewerConfigEntry, RainViewerCoordinator
 from .http import async_setup_http
 
-PLATFORMS = [Platform.BINARY_SENSOR, Platform.IMAGE, Platform.SENSOR]
+PLATFORMS = [
+    Platform.BINARY_SENSOR,
+    Platform.IMAGE,
+    Platform.SENSOR,
+]
 
 
 async def async_setup_entry(
