@@ -44,7 +44,9 @@ class RainViewerCleanRadarBoundsView(HomeAssistantView):
 
     url = CLEAN_RADAR_BOUNDS_URL
     name = "api:rainviewer_nowcast:clean_radar_bounds"
-    requires_auth = True
+    # Dashboard image elements are normal browser <img> requests and do not
+    # include Home Assistant's frontend bearer token.
+    requires_auth = False
 
     async def get(
         self,
