@@ -18,6 +18,7 @@ from .analysis import (
     base_map_tile_requests,
     radar_map_tile_requests,
     render_clean_radar_bounds_overlay,
+    render_clean_radar_bounds_map,
     render_clean_radar_animation_map,
     render_clean_radar_animation_overlay,
     render_clean_radar_map,
@@ -299,6 +300,8 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
         zoom: int,
         width: int,
         height: int,
+        background: bytes | None = None,
+        radar_opacity: float = 1.0,
     ) -> bytes:
         """Return clean radar rendered into the requested map bounds."""
         tile_requests = radar_map_tile_requests(
@@ -323,6 +326,20 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
                     x=tile_x,
                     y=tile_y,
                 )
+            )
+
+        if background is not None:
+            return render_clean_radar_bounds_map(
+                clean_tiles=clean_tiles,
+                background=background,
+                north=north,
+                south=south,
+                east=east,
+                west=west,
+                zoom=zoom,
+                width=width,
+                height=height,
+                radar_opacity=radar_opacity,
             )
 
         return render_clean_radar_bounds_overlay(

@@ -423,6 +423,80 @@ def render_clean_radar_bounds_overlay(
     height: int,
 ) -> bytes:
     """Render clean radar tiles into a transparent image for map bounds."""
+    return _encode_png(
+        _render_clean_radar_bounds_frame(
+            clean_tiles=clean_tiles,
+            north=north,
+            south=south,
+            east=east,
+            west=west,
+            zoom=zoom,
+            width=width,
+            height=height,
+        )
+    )
+
+
+def render_clean_radar_bounds_map(
+    *,
+    clean_tiles: list[RadarMapTile],
+    background: bytes,
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    zoom: int,
+    width: int,
+    height: int,
+    radar_opacity: float = 1.0,
+) -> bytes:
+    """Render clean radar tiles over a supplied map background."""
+    with Image.open(BytesIO(background)) as image:
+        frame = image.convert("RGBA").resize(
+            (width, height),
+            Image.Resampling.BILINEAR,
+        )
+
+    overlay = _render_clean_radar_bounds_frame(
+        clean_tiles=clean_tiles,
+        north=north,
+        south=south,
+        east=east,
+        west=west,
+        zoom=zoom,
+        width=width,
+        height=height,
+    )
+    if radar_opacity < 1.0:
+        overlay = _with_scaled_alpha(overlay, max(0.0, radar_opacity))
+    frame.alpha_composite(overlay)
+    return _encode_png(frame)
+
+
+def render_clean_radar_map(
+    *,
+    radar_tile: bytes,
+    base_tiles: list[BaseMapTile],
+) -> bytes:
+    """Render a cleaner radar map from base-map tiles and an analysis tile."""
+    frame = _render_base_frame(base_tiles)
+    frame.alpha_composite(_clean_radar_image(radar_tile))
+    _draw_center_marker(frame)
+    return _encode_png(frame)
+
+
+def _render_clean_radar_bounds_frame(
+    *,
+    clean_tiles: list[RadarMapTile],
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    zoom: int,
+    width: int,
+    height: int,
+) -> Image.Image:
+    """Render clean radar tiles into a transparent bounds-aligned frame."""
     frame = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     left, top = _latlon_to_world_pixels(north, west, zoom)
     right, bottom = _latlon_to_world_pixels(south, east, zoom)
@@ -446,19 +520,7 @@ def render_clean_radar_bounds_overlay(
             )
             _alpha_composite_clipped(frame, overlay, x_offset, y_offset)
 
-    return _encode_png(frame)
-
-
-def render_clean_radar_map(
-    *,
-    radar_tile: bytes,
-    base_tiles: list[BaseMapTile],
-) -> bytes:
-    """Render a cleaner radar map from base-map tiles and an analysis tile."""
-    frame = _render_base_frame(base_tiles)
-    frame.alpha_composite(_clean_radar_image(radar_tile))
-    _draw_center_marker(frame)
-    return _encode_png(frame)
+    return frame
 
 
 def render_clean_radar_animation_overlay(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from aiohttp import web
 
@@ -44,9 +45,7 @@ class RainViewerCleanRadarBoundsView(HomeAssistantView):
 
     url = CLEAN_RADAR_BOUNDS_URL
     name = "api:rainviewer_nowcast:clean_radar_bounds"
-    # Dashboard image elements are normal browser <img> requests and do not
-    # include Home Assistant's frontend bearer token.
-    requires_auth = False
+    requires_auth = True
 
     async def get(
         self,
@@ -69,9 +68,16 @@ class RainViewerCleanRadarBoundsView(HomeAssistantView):
         west = _query_float(request, "west")
         zoom = _query_int(request, "zoom", coordinator.zoom)
         width = _query_int(request, "width", 1200)
-        height = _query_int(request, "height", 624)
+        height = _query_int(request, "height", 620)
+        background_path = request.query.get("background")
+        radar_opacity = _query_float_default(request, "opacity", 1.0)
         _validate_bounds(north=north, south=south, east=east, west=west)
         _validate_dimensions(zoom=zoom, width=width, height=height)
+        _validate_opacity(radar_opacity)
+
+        background = None
+        if background_path is not None:
+            background = await _read_local_background(hass, background_path)
 
         try:
             image = await coordinator.async_get_clean_radar_bounds_overlay(
@@ -82,6 +88,8 @@ class RainViewerCleanRadarBoundsView(HomeAssistantView):
                 zoom=zoom,
                 width=width,
                 height=height,
+                background=background,
+                radar_opacity=radar_opacity,
             )
         except Exception as err:
             _LOGGER.debug("Could not render clean radar bounds overlay", exc_info=True)
@@ -99,6 +107,17 @@ def _query_float(request: web.Request, name: str) -> float:
     value = request.query.get(name)
     if value is None:
         raise web.HTTPBadRequest(text=f"Missing query parameter: {name}")
+    try:
+        return float(value)
+    except ValueError as err:
+        raise web.HTTPBadRequest(text=f"Invalid query parameter: {name}") from err
+
+
+def _query_float_default(request: web.Request, name: str, default: float) -> float:
+    """Return an optional floating-point query parameter."""
+    value = request.query.get(name)
+    if value is None:
+        return default
     try:
         return float(value)
     except ValueError as err:
@@ -138,3 +157,31 @@ def _validate_dimensions(*, zoom: int, width: int, height: int) -> None:
         raise web.HTTPBadRequest(text="Image width is outside bounds")
     if height < _MIN_IMAGE_SIZE or height > _MAX_IMAGE_SIZE:
         raise web.HTTPBadRequest(text="Image height is outside bounds")
+
+
+def _validate_opacity(opacity: float) -> None:
+    """Validate the optional rendered radar opacity."""
+    if opacity < 0.0 or opacity > 1.0:
+        raise web.HTTPBadRequest(text="Opacity is outside bounds")
+
+
+async def _read_local_background(
+    hass: HomeAssistant,
+    background_path: str,
+) -> bytes:
+    """Read a background image from Home Assistant's public www directory."""
+    prefix = "/local/"
+    if not background_path.startswith(prefix):
+        raise web.HTTPBadRequest(text="Background must be a /local/ path")
+
+    www_root = Path(hass.config.path("www")).resolve()
+    relative_path = background_path[len(prefix) :].lstrip("/")
+    candidate = (www_root / relative_path).resolve()
+    try:
+        candidate.relative_to(www_root)
+    except ValueError as err:
+        raise web.HTTPBadRequest(text="Background path is invalid") from err
+    if not candidate.is_file():
+        raise web.HTTPBadRequest(text="Background file does not exist")
+
+    return await hass.async_add_executor_job(candidate.read_bytes)
