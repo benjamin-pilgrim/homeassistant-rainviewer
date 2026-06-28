@@ -11,8 +11,10 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .analysis import centered_view_bounds
 from .const import ATTRIBUTION, DOMAIN
 from .coordinator import RainViewerConfigEntry, RainViewerCoordinator
+from .http import clean_radar_bounds_url
 
 
 async def async_setup_entry(
@@ -86,6 +88,11 @@ class RainViewerRadarMapImage(
         if data is None:
             return {}
         motion = data.motion
+        bounds = centered_view_bounds(
+            self.coordinator.latitude,
+            self.coordinator.longitude,
+            self.coordinator.zoom,
+        )
         return {
             "raining_now": data.raining_now,
             "rain_approaching": data.rain_approaching,
@@ -104,6 +111,12 @@ class RainViewerRadarMapImage(
             "latitude": self.coordinator.latitude,
             "longitude": self.coordinator.longitude,
             "zoom": self.coordinator.zoom,
+            "map_bounds": bounds,
+            "leaflet_image_bounds": [
+                [bounds["south"], bounds["west"]],
+                [bounds["north"], bounds["east"]],
+            ],
+            "clean_radar_bounds_url": clean_radar_bounds_url(self._entry.entry_id),
         }
 
 

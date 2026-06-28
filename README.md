@@ -83,6 +83,18 @@ The integration creates:
 - Clean radar images are generated from the unsmoothed analysis tile and use the
   decoded intensity mask with a custom display palette. These are visual-only
   renders; the source-like RainViewer map and overlay remain available.
+- Image entities expose `map_bounds`, `leaflet_image_bounds`, and
+  `clean_radar_bounds_url` attributes. `clean_radar_bounds_url` can render a
+  transparent clean-radar overlay for any fixed Web Mercator map image bounds:
+
+```text
+/api/rainviewer_nowcast/<entry_id>/clean_radar_bounds.png?north=<lat>&south=<lat>&east=<lon>&west=<lon>&zoom=7&width=1200&height=624
+```
+
+  For a `picture-elements` dashboard map, add this as a `type: image` element
+  with `top: 50%`, `left: 50%`, `width: 100%`, and a lower `z-index` than the
+  station labels. The `north/south/east/west` values must match the base map
+  image bounds.
 - The image entities refresh when the RainViewer frame changes. `Radar Map`
   uses OpenStreetMap tiles as a visual base map; `Radar Overlay` is the raw
   RainViewer overlay.

@@ -67,6 +67,15 @@ class BaseMapTile:
     y_offset: int
 
 
+@dataclass(slots=True, frozen=True)
+class RadarMapTile:
+    """A radar map tile and its Web Mercator tile coordinate."""
+
+    data: bytes
+    x: int
+    y: int
+
+
 _INTENSITY_ALPHA_THRESHOLD = 24
 _INTENSITY_WET_THRESHOLD = 18
 _MIN_WET_COVERAGE_PERCENT = 5.0
@@ -295,6 +304,42 @@ def _latlon_to_world_pixels(
     return x_coord, y_coord
 
 
+def _world_pixels_to_latlon(
+    x_coord: float,
+    y_coord: float,
+    zoom: int,
+    tile_size: int = 256,
+) -> tuple[float, float]:
+    """Return a latitude/longitude from Web Mercator world-pixel coordinates."""
+    scale = tile_size * (2**zoom)
+    longitude = x_coord / scale * 360 - 180
+    mercator_y = math.pi * (1 - 2 * y_coord / scale)
+    latitude = math.degrees(math.atan(math.sinh(mercator_y)))
+    return latitude, longitude
+
+
+def centered_view_bounds(
+    latitude: float,
+    longitude: float,
+    zoom: int,
+) -> dict[str, float]:
+    """Return lat/lon bounds for the coordinate-centered radar image."""
+    center_x, center_y = _latlon_to_world_pixels(latitude, longitude, zoom)
+    left = center_x - TILE_SIZE / 2
+    right = center_x + TILE_SIZE / 2
+    top = center_y - TILE_SIZE / 2
+    bottom = center_y + TILE_SIZE / 2
+
+    north, west = _world_pixels_to_latlon(left, top, zoom)
+    south, east = _world_pixels_to_latlon(right, bottom, zoom)
+    return {
+        "north": round(north, 6),
+        "south": round(south, 6),
+        "east": round(east, 6),
+        "west": round(west, 6),
+    }
+
+
 def base_map_tile_requests(
     latitude: float,
     longitude: float,
@@ -327,6 +372,31 @@ def base_map_tile_requests(
     return requests
 
 
+def radar_map_tile_requests(
+    *,
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    zoom: int,
+) -> list[tuple[int, int]]:
+    """Return XYZ tile coordinates needed to cover lat/lon bounds."""
+    left, top = _latlon_to_world_pixels(north, west, zoom)
+    right, bottom = _latlon_to_world_pixels(south, east, zoom)
+    tile_count = 2**zoom
+    tile_left = max(0, math.floor(min(left, right) / 256))
+    tile_right = min(tile_count - 1, math.floor((max(left, right) - 1) / 256))
+    tile_top = max(0, math.floor(min(top, bottom) / 256))
+    tile_bottom = min(tile_count - 1, math.floor((max(top, bottom) - 1) / 256))
+
+    requests: list[tuple[int, int]] = []
+    for tile_x in range(tile_left, tile_right + 1):
+        for tile_y in range(tile_top, tile_bottom + 1):
+            requests.append((tile_x, tile_y))
+
+    return requests
+
+
 def render_radar_map(
     *,
     radar_tile: bytes,
@@ -339,6 +409,44 @@ def render_radar_map(
 def render_clean_radar_overlay(*, radar_tile: bytes) -> bytes:
     """Render a cleaner transparent radar overlay from an analysis tile."""
     return _encode_png(_clean_radar_image(radar_tile))
+
+
+def render_clean_radar_bounds_overlay(
+    *,
+    clean_tiles: list[RadarMapTile],
+    north: float,
+    south: float,
+    east: float,
+    west: float,
+    zoom: int,
+    width: int,
+    height: int,
+) -> bytes:
+    """Render clean radar tiles into a transparent image for map bounds."""
+    frame = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    left, top = _latlon_to_world_pixels(north, west, zoom)
+    right, bottom = _latlon_to_world_pixels(south, east, zoom)
+    world_width = right - left
+    world_height = bottom - top
+
+    for tile in clean_tiles:
+        tile_left = tile.x * 256
+        tile_top = tile.y * 256
+        x_offset = round((tile_left - left) / world_width * width)
+        y_offset = round((tile_top - top) / world_height * height)
+        x_next = round((tile_left + 256 - left) / world_width * width)
+        y_next = round((tile_top + 256 - top) / world_height * height)
+        tile_width = max(1, x_next - x_offset)
+        tile_height = max(1, y_next - y_offset)
+
+        with Image.open(BytesIO(tile.data)) as image:
+            overlay = image.convert("RGBA").resize(
+                (tile_width, tile_height),
+                Image.Resampling.BILINEAR,
+            )
+            _alpha_composite_clipped(frame, overlay, x_offset, y_offset)
+
+    return _encode_png(frame)
 
 
 def render_clean_radar_map(
@@ -444,6 +552,30 @@ def _render_radar_frame(
     canvas.alpha_composite(_radar_image(radar_tile))
     _draw_center_marker(canvas)
     return canvas
+
+
+def _alpha_composite_clipped(
+    canvas: Image.Image,
+    overlay: Image.Image,
+    x_offset: int,
+    y_offset: int,
+) -> None:
+    """Composite an overlay, cropping portions outside the canvas."""
+    dest_left = max(0, x_offset)
+    dest_top = max(0, y_offset)
+    dest_right = min(canvas.width, x_offset + overlay.width)
+    dest_bottom = min(canvas.height, y_offset + overlay.height)
+    if dest_left >= dest_right or dest_top >= dest_bottom:
+        return
+
+    source_left = dest_left - x_offset
+    source_top = dest_top - y_offset
+    source_right = source_left + dest_right - dest_left
+    source_bottom = source_top + dest_bottom - dest_top
+    canvas.alpha_composite(
+        overlay.crop((source_left, source_top, source_right, source_bottom)),
+        (dest_left, dest_top),
+    )
 
 
 def _render_base_frame(base_tiles: list[BaseMapTile]) -> Image.Image:

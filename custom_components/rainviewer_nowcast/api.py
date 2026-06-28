@@ -71,6 +71,30 @@ async def get_radar_tile(
     return await response.read()
 
 
+async def get_radar_xyz_tile(
+    session: aiohttp.ClientSession,
+    host: str,
+    frame: RainViewerFrame,
+    zoom: int,
+    tile_x: int,
+    tile_y: int,
+    *,
+    smooth: bool = True,
+    snow: bool = False,
+) -> bytes:
+    """Return a Web Mercator RainViewer radar tile."""
+    url = (
+        f"{host}{frame.path}/{TILE_SIZE}/{zoom}/"
+        f"{tile_x}/{tile_y}/2/{int(smooth)}_{int(snow)}.png"
+    )
+    response = await session.get(
+        url,
+        raise_for_status=True,
+        timeout=aiohttp.ClientTimeout(total=30),
+    )
+    return await response.read()
+
+
 async def get_osm_tile(
     session: aiohttp.ClientSession,
     zoom: int,

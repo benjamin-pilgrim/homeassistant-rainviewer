@@ -13,8 +13,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .analysis import (
     BaseMapTile,
     NowcastResult,
+    RadarMapTile,
     analyse_nowcast,
     base_map_tile_requests,
+    radar_map_tile_requests,
+    render_clean_radar_bounds_overlay,
     render_clean_radar_animation_map,
     render_clean_radar_animation_overlay,
     render_clean_radar_map,
@@ -25,7 +28,13 @@ from .analysis import (
     render_radar_animation_overlay,
     render_radar_map,
 )
-from .api import get_osm_tile, get_radar_tile, get_weather_maps
+from .api import (
+    RainViewerFrame,
+    get_osm_tile,
+    get_radar_tile,
+    get_radar_xyz_tile,
+    get_weather_maps,
+)
 from .const import (
     CONF_HORIZON_MINUTES,
     CONF_LATITUDE,
@@ -45,6 +54,7 @@ from .const import (
 from .validation import async_capture_validation
 
 _LOGGER = logging.getLogger(__name__)
+_MAX_BOUNDS_TILE_REQUESTS = 64
 
 RainViewerConfigEntry = ConfigEntry
 
@@ -57,6 +67,9 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
         self._entry = entry
         self._session = async_get_clientsession(hass=hass)
         self._base_tile_cache: dict[tuple[int, int, int], bytes] = {}
+        self._clean_tile_cache: dict[tuple[int, int, int, int], bytes] = {}
+        self._latest_host: str | None = None
+        self._latest_frame: RainViewerFrame | None = None
         self.radar_image: bytes | None = None
         self.radar_overlay: bytes | None = None
         self.clean_radar_image: bytes | None = None
@@ -137,6 +150,14 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
         """Fetch the latest radar data and derive a nowcast."""
         maps = await get_weather_maps(self._session)
         frames = maps.frames[-7:]
+        latest_frame = frames[-1] if frames else None
+        if latest_frame is not None and (
+            self._latest_frame is None
+            or latest_frame.time != self._latest_frame.time
+        ):
+            self._clean_tile_cache.clear()
+        self._latest_host = maps.host
+        self._latest_frame = latest_frame
         analysis_tiles = []
         display_tiles = []
         frame_times = []
@@ -267,3 +288,80 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
             self.radar_image_last_updated = result.frame_time
 
         return result
+
+    async def async_get_clean_radar_bounds_overlay(
+        self,
+        *,
+        north: float,
+        south: float,
+        east: float,
+        west: float,
+        zoom: int,
+        width: int,
+        height: int,
+    ) -> bytes:
+        """Return clean radar rendered into the requested map bounds."""
+        tile_requests = radar_map_tile_requests(
+            north=north,
+            south=south,
+            east=east,
+            west=west,
+            zoom=zoom,
+        )
+        if len(tile_requests) > _MAX_BOUNDS_TILE_REQUESTS:
+            raise ValueError("Requested clean radar overlay covers too many tiles")
+
+        clean_tiles = []
+        for tile_x, tile_y in tile_requests:
+            clean_tiles.append(
+                RadarMapTile(
+                    data=await self.async_get_clean_radar_tile(
+                        zoom,
+                        tile_x,
+                        tile_y,
+                    ),
+                    x=tile_x,
+                    y=tile_y,
+                )
+            )
+
+        return render_clean_radar_bounds_overlay(
+            clean_tiles=clean_tiles,
+            north=north,
+            south=south,
+            east=east,
+            west=west,
+            zoom=zoom,
+            width=width,
+            height=height,
+        )
+
+    async def async_get_clean_radar_tile(
+        self,
+        zoom: int,
+        tile_x: int,
+        tile_y: int,
+    ) -> bytes:
+        """Return a clean-rendered transparent XYZ radar tile."""
+        if self._latest_host is None or self._latest_frame is None:
+            raise RuntimeError("No RainViewer radar frame is available")
+
+        cache_key = (self._latest_frame.time, zoom, tile_x, tile_y)
+        if cache_key in self._clean_tile_cache:
+            return self._clean_tile_cache[cache_key]
+
+        radar_tile = await get_radar_xyz_tile(
+            self._session,
+            self._latest_host,
+            self._latest_frame,
+            zoom,
+            tile_x,
+            tile_y,
+            smooth=False,
+            snow=False,
+        )
+        rendered_tile = render_clean_radar_overlay(radar_tile=radar_tile)
+        if len(self._clean_tile_cache) >= 256:
+            self._clean_tile_cache.clear()
+        self._clean_tile_cache[cache_key] = rendered_tile
+        return rendered_tile
