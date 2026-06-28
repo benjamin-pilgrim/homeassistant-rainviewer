@@ -15,6 +15,10 @@ from .analysis import (
     NowcastResult,
     analyse_nowcast,
     base_map_tile_requests,
+    render_clean_radar_animation_map,
+    render_clean_radar_animation_overlay,
+    render_clean_radar_map,
+    render_clean_radar_overlay,
     render_nowcast_animation_map,
     render_nowcast_animation_overlay,
     render_radar_animation_map,
@@ -55,6 +59,10 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
         self._base_tile_cache: dict[tuple[int, int, int], bytes] = {}
         self.radar_image: bytes | None = None
         self.radar_overlay: bytes | None = None
+        self.clean_radar_image: bytes | None = None
+        self.clean_radar_overlay: bytes | None = None
+        self.clean_radar_animation: bytes | None = None
+        self.clean_radar_animation_overlay: bytes | None = None
         self.radar_animation: bytes | None = None
         self.radar_animation_overlay: bytes | None = None
         self.nowcast_animation: bytes | None = None
@@ -190,6 +198,12 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
 
         if display_tiles:
             self.radar_overlay = display_tiles[-1]
+            self.clean_radar_overlay = render_clean_radar_overlay(
+                radar_tile=analysis_tiles[-1]
+            )
+            self.clean_radar_animation_overlay = render_clean_radar_animation_overlay(
+                radar_tiles=analysis_tiles
+            )
             self.radar_animation_overlay = render_radar_animation_overlay(
                 radar_tiles=display_tiles
             )
@@ -224,6 +238,14 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
                     radar_tile=display_tiles[-1],
                     base_tiles=base_tiles,
                 )
+                self.clean_radar_image = render_clean_radar_map(
+                    radar_tile=analysis_tiles[-1],
+                    base_tiles=base_tiles,
+                )
+                self.clean_radar_animation = render_clean_radar_animation_map(
+                    radar_tiles=analysis_tiles,
+                    base_tiles=base_tiles,
+                )
                 self.radar_animation = render_radar_animation_map(
                     radar_tiles=display_tiles,
                     base_tiles=base_tiles,
@@ -237,6 +259,8 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
             except Exception:
                 _LOGGER.exception("Could not render radar map image")
                 self.radar_image = self.radar_overlay
+                self.clean_radar_image = self.clean_radar_overlay
+                self.clean_radar_animation = self.clean_radar_animation_overlay
                 self.radar_animation = self.radar_animation_overlay
                 self.nowcast_animation = self.nowcast_animation_overlay
 

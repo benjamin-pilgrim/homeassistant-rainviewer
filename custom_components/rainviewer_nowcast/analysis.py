@@ -8,6 +8,7 @@ from io import BytesIO
 import math
 
 from PIL import Image, ImageDraw
+from PIL import ImageFilter
 
 from .const import ANALYSIS_SIZE, TILE_SIZE
 
@@ -74,6 +75,20 @@ _PALETTE_QUANT_BITS = 5
 _PALETTE_QUANT_SIZE = 1 << _PALETTE_QUANT_BITS
 _PALETTE_SHIFT = 8 - _PALETTE_QUANT_BITS
 _PALETTE_LUT: list[int] | None = None
+
+_CLEAN_RENDER_MIN_INTENSITY = 18
+_CLEAN_RENDER_RAMP: tuple[tuple[int, tuple[int, int, int]], ...] = (
+    (18, (156, 160, 156)),
+    (32, (139, 151, 151)),
+    (52, (115, 145, 154)),
+    (75, (72, 154, 202)),
+    (95, (27, 111, 192)),
+    (105, (72, 168, 88)),
+    (125, (243, 196, 55)),
+    (145, (236, 112, 44)),
+    (170, (205, 49, 49)),
+    (255, (162, 67, 171)),
+)
 
 # RainViewer color scheme 2 "Universal Blue" rain ramp from the published API
 # color table. Values are relative 0-255 intensity, not rainfall rate.
@@ -321,6 +336,48 @@ def render_radar_map(
     return _encode_png(_render_radar_frame(radar_tile, base_tiles))
 
 
+def render_clean_radar_overlay(*, radar_tile: bytes) -> bytes:
+    """Render a cleaner transparent radar overlay from an analysis tile."""
+    return _encode_png(_clean_radar_image(radar_tile))
+
+
+def render_clean_radar_map(
+    *,
+    radar_tile: bytes,
+    base_tiles: list[BaseMapTile],
+) -> bytes:
+    """Render a cleaner radar map from base-map tiles and an analysis tile."""
+    frame = _render_base_frame(base_tiles)
+    frame.alpha_composite(_clean_radar_image(radar_tile))
+    _draw_center_marker(frame)
+    return _encode_png(frame)
+
+
+def render_clean_radar_animation_overlay(
+    *,
+    radar_tiles: list[bytes],
+) -> bytes | None:
+    """Render an animated clean transparent radar overlay."""
+    frames = [_clean_radar_image(tile) for tile in radar_tiles]
+    return _encode_apng(frames)
+
+
+def render_clean_radar_animation_map(
+    *,
+    radar_tiles: list[bytes],
+    base_tiles: list[BaseMapTile],
+) -> bytes | None:
+    """Render an animated clean radar map over base-map tiles."""
+    frames = []
+    for tile in radar_tiles:
+        frame = _render_base_frame(base_tiles)
+        frame.alpha_composite(_clean_radar_image(tile))
+        _draw_center_marker(frame)
+        frames.append(frame)
+
+    return _encode_apng(frames)
+
+
 def render_radar_animation_map(
     *,
     radar_tiles: list[bytes],
@@ -443,6 +500,53 @@ def _radar_image(radar_tile: bytes) -> Image.Image:
                 pixels[x_coord, y_coord] = (red, green, blue, 0)
 
     return radar
+
+
+def _clean_radar_image(radar_tile: bytes) -> Image.Image:
+    """Return a radar overlay rendered from decoded intensity values."""
+    mask = _decode_intensity(radar_tile, TILE_SIZE)
+    image = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (0, 0, 0, 0))
+    pixels = image.load()
+
+    for index, intensity in enumerate(mask):
+        if intensity < _CLEAN_RENDER_MIN_INTENSITY:
+            continue
+        x_coord = index % TILE_SIZE
+        y_coord = index // TILE_SIZE
+        red, green, blue = _clean_render_color(intensity)
+        alpha = _clean_render_alpha(intensity)
+        pixels[x_coord, y_coord] = (red, green, blue, alpha)
+
+    return image.filter(ImageFilter.GaussianBlur(radius=0.55))
+
+
+def _clean_render_color(intensity: int) -> tuple[int, int, int]:
+    """Return a display color for a decoded radar intensity."""
+    previous_value, previous_color = _CLEAN_RENDER_RAMP[0]
+    if intensity <= previous_value:
+        return previous_color
+
+    for value, color in _CLEAN_RENDER_RAMP[1:]:
+        if intensity <= value:
+            position = (intensity - previous_value) / (value - previous_value)
+            return (
+                round(previous_color[0] + (color[0] - previous_color[0]) * position),
+                round(previous_color[1] + (color[1] - previous_color[1]) * position),
+                round(previous_color[2] + (color[2] - previous_color[2]) * position),
+            )
+        previous_value = value
+        previous_color = color
+
+    return _CLEAN_RENDER_RAMP[-1][1]
+
+
+def _clean_render_alpha(intensity: int) -> int:
+    """Return display alpha for a decoded radar intensity."""
+    position = (intensity - _CLEAN_RENDER_MIN_INTENSITY) / (
+        255 - _CLEAN_RENDER_MIN_INTENSITY
+    )
+    position = max(0.0, min(1.0, position))
+    return round(240 * math.sqrt(position))
 
 
 def _projected_radar_images(

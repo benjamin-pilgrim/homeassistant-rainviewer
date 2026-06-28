@@ -54,6 +54,10 @@ The integration creates:
 | `sensor.rain_nowcast_confidence` | Simple confidence score from motion consistency and projected hits. |
 | `image.radar_map` | Latest 512px radar map image with an OpenStreetMap base layer, RainViewer radar overlay, and center marker. |
 | `image.radar_overlay` | Latest raw 512px RainViewer radar overlay without base-map tiles. |
+| `image.clean_radar_map` | Cleaner radar map rendered from decoded analysis intensity with an OpenStreetMap base layer. |
+| `image.clean_radar_overlay` | Cleaner transparent radar overlay rendered from decoded analysis intensity. |
+| `image.clean_radar_animation` | Animated clean radar map rendered from recent decoded analysis intensity. |
+| `image.clean_radar_animation_overlay` | Animated clean transparent radar overlay rendered from recent decoded analysis intensity. |
 | `image.radar_animation` | Animated PNG loop of recent radar frames on the OpenStreetMap base layer. |
 | `image.radar_animation_overlay` | Animated PNG loop of recent radar overlays without base-map tiles. |
 | `image.rain_nowcast_animation` | Animated PNG loop with observed radar followed by low-opacity projected future frames. |
@@ -76,6 +80,9 @@ The integration creates:
   configured radius, not a single barely-wet radar pixel.
 - Display images use smoothed Universal Blue rain tiles without separate snow
   coloring (`2/1_0`) so the visual palette matches the analysis palette.
+- Clean radar images are generated from the unsmoothed analysis tile and use the
+  decoded intensity mask with a custom display palette. These are visual-only
+  renders; the source-like RainViewer map and overlay remain available.
 - The image entities refresh when the RainViewer frame changes. `Radar Map`
   uses OpenStreetMap tiles as a visual base map; `Radar Overlay` is the raw
   RainViewer overlay.

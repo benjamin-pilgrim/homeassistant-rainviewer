@@ -26,6 +26,10 @@ async def async_setup_entry(
         [
             RainViewerRadarMapImage(coordinator, config_entry),
             RainViewerRadarOverlayImage(coordinator, config_entry),
+            RainViewerCleanRadarMapImage(coordinator, config_entry),
+            RainViewerCleanRadarOverlayImage(coordinator, config_entry),
+            RainViewerCleanRadarAnimationImage(coordinator, config_entry),
+            RainViewerCleanRadarAnimationOverlayImage(coordinator, config_entry),
             RainViewerRadarAnimationImage(coordinator, config_entry),
             RainViewerRadarAnimationOverlayImage(coordinator, config_entry),
             RainViewerNowcastAnimationImage(coordinator, config_entry),
@@ -120,6 +124,84 @@ class RainViewerRadarOverlayImage(RainViewerRadarMapImage):
     async def async_image(self) -> bytes | None:
         """Return latest raw radar overlay image bytes."""
         return self.coordinator.radar_overlay
+
+
+class RainViewerCleanRadarMapImage(RainViewerRadarMapImage):
+    """Latest clean-rendered radar map image."""
+
+    _attr_name = "Clean Radar Map"
+
+    def __init__(
+        self,
+        coordinator: RainViewerCoordinator,
+        entry: RainViewerConfigEntry,
+    ) -> None:
+        """Initialise the image."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_clean_radar_map"
+
+    async def async_image(self) -> bytes | None:
+        """Return latest clean-rendered radar map bytes."""
+        return self.coordinator.clean_radar_image
+
+
+class RainViewerCleanRadarOverlayImage(RainViewerRadarMapImage):
+    """Latest clean-rendered radar overlay image."""
+
+    _attr_name = "Clean Radar Overlay"
+
+    def __init__(
+        self,
+        coordinator: RainViewerCoordinator,
+        entry: RainViewerConfigEntry,
+    ) -> None:
+        """Initialise the image."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_clean_radar_overlay"
+
+    async def async_image(self) -> bytes | None:
+        """Return latest clean-rendered radar overlay bytes."""
+        return self.coordinator.clean_radar_overlay
+
+
+class RainViewerCleanRadarAnimationImage(RainViewerRadarMapImage):
+    """Animated clean-rendered radar map loop."""
+
+    _attr_name = "Clean Radar Animation"
+
+    def __init__(
+        self,
+        coordinator: RainViewerCoordinator,
+        entry: RainViewerConfigEntry,
+    ) -> None:
+        """Initialise the image."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_clean_radar_animation"
+
+    async def async_image(self) -> bytes | None:
+        """Return latest clean-rendered radar animation bytes."""
+        return self.coordinator.clean_radar_animation
+
+
+class RainViewerCleanRadarAnimationOverlayImage(RainViewerRadarMapImage):
+    """Animated clean-rendered transparent radar overlay loop."""
+
+    _attr_name = "Clean Radar Animation Overlay"
+
+    def __init__(
+        self,
+        coordinator: RainViewerCoordinator,
+        entry: RainViewerConfigEntry,
+    ) -> None:
+        """Initialise the image."""
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = (
+            f"{entry.entry_id}_clean_radar_animation_overlay"
+        )
+
+    async def async_image(self) -> bytes | None:
+        """Return latest clean-rendered transparent animation bytes."""
+        return self.coordinator.clean_radar_animation_overlay
 
 
 class RainViewerRadarAnimationImage(RainViewerRadarMapImage):
