@@ -26,6 +26,17 @@ class MotionVector:
 
 
 @dataclass(slots=True, frozen=True)
+class ProjectionPoint:
+    """Projected wet-area result at one forecast horizon."""
+
+    minutes: int
+    total_pixels: int
+    wet_pixels: int
+    coverage_percent: float
+    significant: bool
+
+
+@dataclass(slots=True, frozen=True)
 class NowcastResult:
     """Derived nowcast values."""
 
@@ -36,11 +47,14 @@ class NowcastResult:
     duration_minutes: int | None
     confidence: int
     now_coverage_percent: float
+    now_total_pixels: int
+    now_wet_pixels: int
     frame_time: datetime | None
     generated_time: datetime | None
     frame_age_minutes: float | None
     motion: MotionVector | None
     frame_count: int
+    projection_trace: tuple[ProjectionPoint, ...]
 
 
 @dataclass(slots=True, frozen=True)
@@ -674,16 +688,50 @@ def _project_rain_window(
     *,
     radius_px: float,
     horizon_minutes: int,
-) -> tuple[int | None, int | None, int | None, int]:
+) -> tuple[int | None, int | None, int | None, int, tuple[ProjectionPoint, ...]]:
     """Project the latest mask and return ETA, clear ETA, duration, confidence."""
     if motion is None:
-        return None, None, None, 0
+        return None, None, None, 0, ()
 
-    center = TILE_SIZE // 2
-    radius = max(2, math.ceil(radius_px))
     first_hit: int | None = None
     last_hit: int | None = None
     hit_minutes: list[int] = []
+    trace = _projection_trace(
+        latest_mask,
+        motion,
+        radius_px=radius_px,
+        horizon_minutes=horizon_minutes,
+    )
+
+    for point in trace:
+        if point.significant:
+            hit_minutes.append(point.minutes)
+            if first_hit is None:
+                first_hit = point.minutes
+            last_hit = point.minutes
+
+    if first_hit is None or last_hit is None:
+        return None, None, None, 0, trace
+
+    clear_eta = last_hit + 5
+    if clear_eta > horizon_minutes:
+        clear_eta = None
+
+    duration = len(hit_minutes) * 5
+    return first_hit, clear_eta, duration, min(40, len(hit_minutes) * 8), trace
+
+
+def _projection_trace(
+    latest_mask: list[int],
+    motion: MotionVector,
+    *,
+    radius_px: float,
+    horizon_minutes: int,
+) -> tuple[ProjectionPoint, ...]:
+    """Return projected wet-area results for each forecast horizon."""
+    center = TILE_SIZE // 2
+    radius = max(2, math.ceil(radius_px))
+    points: list[ProjectionPoint] = []
 
     for minutes in range(5, horizon_minutes + 1, 5):
         factor = minutes / 10
@@ -696,22 +744,18 @@ def _project_rain_window(
             center_y=source_center_y,
             radius_px=radius,
         )
+        coverage = round(wet / total * 100, 1) if total else 0.0
+        points.append(
+            ProjectionPoint(
+                minutes=minutes,
+                total_pixels=total,
+                wet_pixels=wet,
+                coverage_percent=coverage,
+                significant=_has_significant_wet_area(total, wet),
+            )
+        )
 
-        if _has_significant_wet_area(total, wet):
-            hit_minutes.append(minutes)
-            if first_hit is None:
-                first_hit = minutes
-            last_hit = minutes
-
-    if first_hit is None or last_hit is None:
-        return None, None, None, 0
-
-    clear_eta = last_hit + 5
-    if clear_eta > horizon_minutes:
-        clear_eta = None
-
-    duration = len(hit_minutes) * 5
-    return first_hit, clear_eta, duration, min(40, len(hit_minutes) * 8)
+    return tuple(points)
 
 
 def analyse_nowcast(
@@ -734,11 +778,14 @@ def analyse_nowcast(
             duration_minutes=None,
             confidence=0,
             now_coverage_percent=0.0,
+            now_total_pixels=0,
+            now_wet_pixels=0,
             frame_time=None,
             generated_time=None,
             frame_age_minutes=None,
             motion=None,
             frame_count=0,
+            projection_trace=(),
         )
 
     analysis_masks = [_decode_intensity(tile, ANALYSIS_SIZE) for tile in tiles]
@@ -760,15 +807,20 @@ def analyse_nowcast(
     clear_eta_minutes: int | None
     duration_minutes: int | None
     projection_confidence: int
+    projection_trace: tuple[ProjectionPoint, ...]
     if raining_now:
         eta_minutes = 0
-        _projected_eta, clear_eta_minutes, projected_duration, projection_confidence = (
-            _project_rain_window(
-                latest_mask,
-                motion,
-                radius_px=radius_px,
-                horizon_minutes=horizon_minutes,
-            )
+        (
+            _projected_eta,
+            clear_eta_minutes,
+            projected_duration,
+            projection_confidence,
+            projection_trace,
+        ) = _project_rain_window(
+            latest_mask,
+            motion,
+            radius_px=radius_px,
+            horizon_minutes=horizon_minutes,
         )
         duration_minutes = projected_duration
         if duration_minutes is None:
@@ -781,6 +833,7 @@ def analyse_nowcast(
             clear_eta_minutes,
             duration_minutes,
             projection_confidence,
+            projection_trace,
         ) = _project_rain_window(
             latest_mask,
             motion,
@@ -819,9 +872,12 @@ def analyse_nowcast(
         duration_minutes=duration_minutes,
         confidence=confidence,
         now_coverage_percent=now_coverage,
+        now_total_pixels=total,
+        now_wet_pixels=wet,
         frame_time=frame_time,
         generated_time=generated_time,
         frame_age_minutes=frame_age_minutes,
         motion=motion,
         frame_count=len(tiles),
+        projection_trace=projection_trace,
     )

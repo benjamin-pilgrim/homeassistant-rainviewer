@@ -27,11 +27,18 @@ from .const import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_RADIUS_KM,
+    CONF_VALIDATION_CAPTURE,
+    CONF_VALIDATION_KEEP_DAYS,
+    CONF_VALIDATION_SAVE_TILES,
     CONF_ZOOM,
     DEFAULT_HORIZON_MINUTES,
     DEFAULT_RADIUS_KM,
+    DEFAULT_VALIDATION_CAPTURE,
+    DEFAULT_VALIDATION_KEEP_DAYS,
+    DEFAULT_VALIDATION_SAVE_TILES,
     DEFAULT_ZOOM,
 )
+from .validation import async_capture_validation
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -88,6 +95,36 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
         """Return the configured RainViewer image zoom."""
         return int(self._entry.data.get(CONF_ZOOM, DEFAULT_ZOOM))
 
+    @property
+    def validation_capture(self) -> bool:
+        """Return whether validation capture is enabled."""
+        return bool(
+            self._entry.options.get(
+                CONF_VALIDATION_CAPTURE,
+                DEFAULT_VALIDATION_CAPTURE,
+            )
+        )
+
+    @property
+    def validation_save_tiles(self) -> bool:
+        """Return whether validation capture should save analysis tiles."""
+        return bool(
+            self._entry.options.get(
+                CONF_VALIDATION_SAVE_TILES,
+                DEFAULT_VALIDATION_SAVE_TILES,
+            )
+        )
+
+    @property
+    def validation_keep_days(self) -> int:
+        """Return validation capture retention in days."""
+        return int(
+            self._entry.options.get(
+                CONF_VALIDATION_KEEP_DAYS,
+                DEFAULT_VALIDATION_KEEP_DAYS,
+            )
+        )
+
     async def _async_update_data(self) -> NowcastResult:
         """Fetch the latest radar data and derive a nowcast."""
         maps = await get_weather_maps(self._session)
@@ -130,6 +167,26 @@ class RainViewerCoordinator(DataUpdateCoordinator[NowcastResult]):
             radius_km=self.radius_km,
             horizon_minutes=self.horizon_minutes,
         )
+
+        if self.validation_capture:
+            try:
+                await async_capture_validation(
+                    self.hass,
+                    self._entry,
+                    host=maps.host,
+                    frames=frames,
+                    analysis_tiles=analysis_tiles,
+                    result=result,
+                    latitude=self.latitude,
+                    longitude=self.longitude,
+                    radius_km=self.radius_km,
+                    horizon_minutes=self.horizon_minutes,
+                    zoom=self.zoom,
+                    save_tiles=self.validation_save_tiles,
+                    keep_days=self.validation_keep_days,
+                )
+            except Exception:
+                _LOGGER.exception("Could not capture validation data")
 
         if display_tiles:
             self.radar_overlay = display_tiles[-1]

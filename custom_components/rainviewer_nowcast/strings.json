@@ -20,6 +20,18 @@
         "title": "Set up RainViewer Nowcast"
       }
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "validation_capture": "Capture validation data",
+          "validation_save_tiles": "Save analysis tiles",
+          "validation_keep_days": "Validation data retention in days"
+        },
+        "description": "Capture replay data under /config/rainviewer_nowcast/validation for local nowcast scoring.",
+        "title": "RainViewer Nowcast options"
+      }
+    }
   }
 }
-

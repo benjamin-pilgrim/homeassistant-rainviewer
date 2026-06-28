@@ -7,7 +7,8 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlowWithReload
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import get_weather_maps
@@ -16,16 +17,24 @@ from .const import (
     CONF_LATITUDE,
     CONF_LONGITUDE,
     CONF_RADIUS_KM,
+    CONF_VALIDATION_CAPTURE,
+    CONF_VALIDATION_KEEP_DAYS,
+    CONF_VALIDATION_SAVE_TILES,
     CONF_ZOOM,
     DEFAULT_HORIZON_MINUTES,
     DEFAULT_RADIUS_KM,
+    DEFAULT_VALIDATION_CAPTURE,
+    DEFAULT_VALIDATION_KEEP_DAYS,
+    DEFAULT_VALIDATION_SAVE_TILES,
     DEFAULT_ZOOM,
     DOMAIN,
     MAX_HORIZON_MINUTES,
     MAX_RADIUS_KM,
+    MAX_VALIDATION_KEEP_DAYS,
     MAX_ZOOM,
     MIN_HORIZON_MINUTES,
     MIN_RADIUS_KM,
+    MIN_VALIDATION_KEEP_DAYS,
     MIN_ZOOM,
 )
 
@@ -39,6 +48,14 @@ class RainViewerNowcastConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a RainViewer Nowcast config flow."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> OptionsFlowWithReload:
+        """Create the options flow."""
+        return RainViewerNowcastOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -104,5 +121,46 @@ class RainViewerNowcastConfigFlow(ConfigFlow, domain=DOMAIN):
                         vol.Coerce(int), vol.Range(min=MIN_ZOOM, max=MAX_ZOOM)
                     ),
                 }
+            ),
+        )
+
+
+class RainViewerNowcastOptionsFlow(OptionsFlowWithReload):
+    """Handle RainViewer Nowcast options."""
+
+    async def async_step_init(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ):
+        """Manage options."""
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(
+                    {
+                        vol.Required(
+                            CONF_VALIDATION_CAPTURE,
+                            default=DEFAULT_VALIDATION_CAPTURE,
+                        ): bool,
+                        vol.Required(
+                            CONF_VALIDATION_SAVE_TILES,
+                            default=DEFAULT_VALIDATION_SAVE_TILES,
+                        ): bool,
+                        vol.Required(
+                            CONF_VALIDATION_KEEP_DAYS,
+                            default=DEFAULT_VALIDATION_KEEP_DAYS,
+                        ): vol.All(
+                            vol.Coerce(int),
+                            vol.Range(
+                                min=MIN_VALIDATION_KEEP_DAYS,
+                                max=MAX_VALIDATION_KEEP_DAYS,
+                            ),
+                        ),
+                    }
+                ),
+                self.config_entry.options,
             ),
         )

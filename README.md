@@ -85,3 +85,18 @@ The integration creates:
 - `Radar Animation` is observed history only. `Rain Nowcast Animation` appends
   generated future frames at low opacity so projected movement is visually
   distinct from observed radar.
+
+## Validation capture
+
+For local algorithm development, the integration has an optional validation
+capture mode in the config entry options. When enabled, each update writes
+append-only replay data under:
+
+```text
+/config/rainviewer_nowcast/validation
+```
+
+The capture stores daily JSONL rows, a `latest.json` snapshot, and optionally
+deduplicated unsmoothed analysis tiles. This data is deliberately kept out of
+Home Assistant entity attributes and recorder history because it changes every
+poll and is intended for offline replay/scoring.
